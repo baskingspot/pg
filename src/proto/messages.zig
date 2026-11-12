@@ -17,17 +17,6 @@ const std = @import("std");
 const testing = std.testing;
 const enums = std.enums;
 
-/// The version word of a client that asks for protocol 3.0.
-///
-/// 3.2 is `0x0003_0002`. A client may ask for a newer minor version and be
-/// told which the server supports in `NegotiateProtocolVersion`; asking for
-/// 3.0 keeps the older semantics, including a four-byte `BackendKeyData` key.
-pub const version_3_0: u32 = 0x0003_0000;
-
-/// 3.2. `BackendKeyData` and `CancelRequest` keys became variable length
-/// (4 to 256 bytes) in this version.
-pub const version_3_2: u32 = 0x0003_0002;
-
 /// Frontend to backend messages. A client encodes these; only a server or a
 /// proxy decodes them.
 pub const Frontend = enum(u8) {

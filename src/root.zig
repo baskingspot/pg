@@ -31,6 +31,7 @@ const testing = std.testing;
 
 pub const frame = @import("proto/frame.zig");
 pub const messages = @import("proto/messages.zig");
+pub const version = @import("proto/version.zig");
 
 test {
     testing.refAllDecls(@This());

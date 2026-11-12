@@ -14,7 +14,7 @@ test:
 [group("lint")]
 lint:
     ziglint
-    zig fmt --check src build.zig
+    zig fmt --check src bench build.zig
     nix fmt -- --ci
     oxfmt --check README.md AGENTS.md .github
     actionlint
@@ -24,11 +24,21 @@ lint:
 [doc("Format everything lint checks")]
 [group("lint")]
 fmt:
-    zig fmt src build.zig
+    zig fmt src bench build.zig
     nix fmt
     oxfmt README.md AGENTS.md .github
     just --fmt
 
+[doc("Run benchmarks (ReleaseFast by default); args pass to the binary: just bench -- --benchtime=250ms --filter=Frame")]
+[group("bench")]
+bench *ARGS:
+    zig build bench -- {{ ARGS }}
+
+[doc("Run every benchmark once: proves the suite builds and runs, without measuring")]
+[group("bench")]
+bench-smoke:
+    zig build bench -- --benchtime=8x --count=1 --no-env
+
 [doc("Everything CI runs")]
 [group("ci")]
-ci: test lint
+ci: test lint bench-smoke
