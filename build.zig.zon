@@ -12,6 +12,12 @@
             .hash = "testingx-0.4.0-ib95-2JkAwDVM639ma-akYafT4bdewLfpFaAEnLBzQXG",
             .lazy = true,
         },
+        // The org's primitives. `fmt.atoi` is strict where `std.fmt.parseInt`
+        // takes a sign and a base; the wire has no such freedom.
+        .stdx = .{
+            .url = "https://baskingspot.dev/stdx/v0.4.0.tar.gz",
+            .hash = "stdx-0.4.0-CcWeghttDwCzAvxm24NX7RL-Wb3ZSqZoHSJDNh6aFzuK",
+        },
     },
     .paths = .{
         "build.zig",

@@ -4,12 +4,15 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const stdx_dep = b.dependency("stdx", .{ .target = target, .optimize = optimize });
+
     // The one exported module. Everything below is a developer step, so a
     // consumer's fetch graph stops here.
     const mod = b.addModule("pg", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{.{ .name = "stdx", .module = stdx_dep.module("stdx") }},
     });
 
     if (b.pkg_hash.len != 0) return;
@@ -42,6 +45,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/root.zig"),
             .target = target,
             .optimize = .ReleaseFast,
+            .imports = &.{.{ .name = "stdx", .module = stdx_dep.module("stdx") }},
         });
 
         const run_bench = testingx.addBench(b, .{

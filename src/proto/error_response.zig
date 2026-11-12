@@ -11,9 +11,10 @@
 
 const std = @import("std");
 const testing = std.testing;
+const atoi = @import("stdx").fmt.atoi;
 
 const messages = @import("messages.zig");
-const Reader = @import("wire.zig").Reader;
+const wire = @import("wire.zig");
 
 pub const Field = struct {
     /// The code byte, exactly as sent. `kind` names it when this library knows
@@ -24,22 +25,24 @@ pub const Field = struct {
     value: []const u8,
 
     pub fn kind(self: Field) ?messages.ErrorField {
-        return messages.ErrorField.fromByte(self.code);
+        return .fromByte(self.code);
     }
 
-    /// The value as an integer, for the `P` and L fields.
+    /// The value as an integer, for the `P` and `L` fields.
     ///
-    /// Decimal ASCII, so a value that is not a number is `error.NotANumber`
-    /// rather than zero.
-    pub fn number(self: Field) !i64 {
-        return std.fmt.parseInt(i64, self.value, 10);
+    /// Those fields are plain decimal ASCII, so no sign and no base prefix: a
+    /// `+`, a `-`, or a space is `error.InvalidCharacter`, and a value too
+    /// large for `u32` is `error.Overflow`. `std.fmt.parseInt` takes all of
+    /// those, which would turn a server bug into a position.
+    pub fn number(self: Field) error{ InvalidCharacter, Overflow }!u32 {
+        return atoi(u32, self.value);
     }
 };
 
 pub const Iterator = struct {
-    reader: Reader,
+    reader: wire.Reader,
 
-    pub const Error = Reader.Error;
+    pub const Error = wire.Error;
 
     pub fn init(body: []const u8) Iterator {
         return .{ .reader = .init(body) };
@@ -50,11 +53,11 @@ pub const Iterator = struct {
     /// A body that runs out before the terminator is an error: the frame said
     /// there were more bytes than the field list accounts for.
     pub fn next(self: *Iterator) Error!?Field {
-        const code = self.reader.peek() orelse return error.Truncated;
-        _ = try self.reader.take(1);
+        const code = wire.peek(&self.reader) orelse return error.UnexpectedEof;
+        _ = try self.reader.skip(1);
         if (code == 0) return null;
 
-        return .{ .code = code, .value = try self.reader.takeString() };
+        return .{ .code = code, .value = try wire.takeString(&self.reader) };
     }
 };
 
@@ -102,7 +105,7 @@ test "a position is a number, and text that is not one says so" {
     var it = fields(body);
 
     const position = (try it.next()).?;
-    try testing.expectEqual(@as(i64, 15), try position.number());
+    try testing.expectEqual(@as(u32, 15), try position.number());
 
     const message = (try it.next()).?;
     try testing.expectError(error.InvalidCharacter, message.number());
@@ -116,12 +119,12 @@ test "the terminator alone is no fields" {
 test "a body with no terminator is truncated" {
     var it = fields("S" ++ "ERROR\x00");
     _ = try it.next();
-    try testing.expectError(error.Truncated, it.next());
+    try testing.expectError(error.UnexpectedEof, it.next());
 }
 
 test "an empty body is truncated, not empty" {
     // Every message of this kind ends with a zero byte, so zero bytes total
     // means the frame was cut short.
     var it = fields("");
-    try testing.expectError(error.Truncated, it.next());
+    try testing.expectError(error.UnexpectedEof, it.next());
 }
