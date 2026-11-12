@@ -1,18 +1,37 @@
-//! By convention, root.zig is the root source file when making a package.
+//! PostgreSQL wire protocol in Zig: message framing, with no IO and no
+//! allocator.
+//!
+//! Callers provide every buffer. `frame.Decoder` finds message boundaries and
+//! hands out headers and body runs; the codecs that read a body into a message
+//! sit above it.
+//!
+//! ```
+//! const pg = @import("pg");
+//!
+//! var decoder: pg.frame.Decoder = .init();
+//! var rest = chunk_from_the_socket;
+//!
+//! while (rest.len != 0 or decoder.inMessage()) {
+//!     const step = try decoder.next(rest);
+//!     rest = rest[step.consumed..];
+//!
+//!     switch (step.event) {
+//!         .header => |header| {
+//!             const tag = try pg.messages.Backend.fromByte(header.tag);
+//!             // ... decode header.bodyLength() bytes from the body runs
+//!         },
+//!         .body => |complete| if (complete) { ... },
+//!         .more => break,
+//!     }
+//! }
+//! ```
+
 const std = @import("std");
-const Io = std.Io;
+const testing = std.testing;
 
-/// This is a documentation comment to explain the `printAnotherMessage` function below.
-///
-/// Accepting an `Io.Writer` instance is a handy way to write reusable code.
-pub fn printAnotherMessage(writer: *Io.Writer) Io.Writer.Error!void {
-    try writer.writeAll("Run `zig build test` to run the tests.\n");
-}
+pub const frame = @import("proto/frame.zig");
+pub const messages = @import("proto/messages.zig");
 
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
-
-test "basic add functionality" {
-    try std.testing.expect(add(3, 7) == 10);
+test {
+    testing.refAllDecls(@This());
 }
