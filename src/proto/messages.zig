@@ -17,6 +17,8 @@ const std = @import("std");
 const testing = std.testing;
 const enums = std.enums;
 
+const readInt = @import("mem.zig").readInt;
+
 /// Frontend to backend messages. A client encodes these; only a server or a
 /// proxy decodes them.
 pub const Frontend = enum(u8) {
@@ -219,7 +221,7 @@ test "fixed messages declare their own length" {
         fixed.describe_portal,
         fixed.execute_portal,
     }) |message| {
-        const declared = std.mem.readInt(u32, message[1..5], .big);
+        const declared = readInt(u32, message[1..5]);
         try testing.expectEqual(@as(u32, message.len - 1), declared);
     }
 }

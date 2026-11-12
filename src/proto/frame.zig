@@ -17,6 +17,7 @@ const mem = std.mem;
 const testing = std.testing;
 
 const messages = @import("messages.zig");
+const readInt = @import("mem.zig").readInt;
 
 /// The largest message the protocol allows. The server's cap is below 2^30
 /// bytes, and a length near 2^31 would overflow the arithmetic that windows a
@@ -106,7 +107,7 @@ pub const Decoder = struct {
 
         if (self.filled < 5) return .{ .consumed = take, .event = .more };
 
-        const length = mem.readInt(u32, self.bytes[1..5], .big);
+        const length = readInt(u32, self.bytes[1..5]);
         self.filled = 0;
         if (length < 4) return error.InvalidLength;
         if (length > max_length) return error.MessageTooLong;
