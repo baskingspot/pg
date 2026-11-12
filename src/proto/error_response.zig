@@ -111,6 +111,30 @@ test "a position is a number, and text that is not one says so" {
     try testing.expectError(error.InvalidCharacter, message.number());
 }
 
+test "a field value takes digits and nothing else" {
+    // The protocol sends a plain decimal, so the things std.fmt.parseInt
+    // would accept by accident are the ones worth refusing: a sign, a space,
+    // and a number too large for the type the caller asked for.
+    const cases = [_]struct { value: []const u8, want: anyerror!u32 }{
+        .{ .value = "15", .want = 15 },
+        .{ .value = "+15", .want = error.InvalidCharacter },
+        .{ .value = "-15", .want = error.InvalidCharacter },
+        .{ .value = " 15", .want = error.InvalidCharacter },
+        .{ .value = "15 ", .want = error.InvalidCharacter },
+        .{ .value = "1_5", .want = error.InvalidCharacter },
+        .{ .value = "", .want = error.InvalidCharacter },
+        .{ .value = "4294967296", .want = error.Overflow },
+        // A leading zero is not a difference in value, and the server has no
+        // reason to send one, so it parses rather than failing.
+        .{ .value = "007", .want = 7 },
+    };
+
+    for (cases) |case| {
+        const field: Field = .{ .code = 'P', .value = case.value };
+        try testing.expectEqual(case.want, field.number());
+    }
+}
+
 test "the terminator alone is no fields" {
     var it = fields("\x00");
     try testing.expectEqual(@as(?Field, null), try it.next());
