@@ -29,9 +29,11 @@
 const std = @import("std");
 const testing = std.testing;
 
+pub const error_response = @import("proto/error_response.zig");
 pub const frame = @import("proto/frame.zig");
 pub const messages = @import("proto/messages.zig");
 pub const version = @import("proto/version.zig");
+pub const wire = @import("proto/wire.zig");
 
 test {
     testing.refAllDecls(@This());
