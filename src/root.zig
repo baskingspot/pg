@@ -31,9 +31,11 @@ const testing = std.testing;
 
 pub const error_response = @import("proto/error_response.zig");
 pub const frame = @import("proto/frame.zig");
+pub const frontend = @import("proto/frontend.zig");
 pub const messages = @import("proto/messages.zig");
 pub const version = @import("proto/version.zig");
 pub const wire = @import("proto/wire.zig");
+pub const write = @import("proto/write.zig");
 
 test {
     testing.refAllDecls(@This());

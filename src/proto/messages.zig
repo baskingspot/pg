@@ -182,25 +182,6 @@ pub const ErrorField = enum(u8) {
         return @fromBackingInt(byte);
     }
 };
-
-/// Messages whose bytes never vary, so the wire form is a constant.
-pub const fixed = struct {
-    pub const sync: [5]u8 = .{ 'S', 0, 0, 0, 4 };
-    pub const terminate: [5]u8 = .{ 'X', 0, 0, 0, 4 };
-    pub const flush: [5]u8 = .{ 'H', 0, 0, 0, 4 };
-
-    /// Bind the unnamed portal to the unnamed statement with no parameters,
-    /// no format codes, and no result format codes. Length 12: the two empty
-    /// names and three zero counts after the four-byte length.
-    pub const bind_empty: [13]u8 = .{ 'B', 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0 };
-
-    /// Describe the unnamed portal. Length 6.
-    pub const describe_portal: [7]u8 = .{ 'D', 0, 0, 0, 6, 'P', 0 };
-
-    /// Execute the unnamed portal with no row limit. Length 9.
-    pub const execute_portal: [10]u8 = .{ 'E', 0, 0, 0, 9, 0, 0, 0, 0, 0 };
-};
-
 /// Whether `value` is one of the tags `E` declares. A non-exhaustive enum can
 /// hold any tag in its backing type, so this is the check a decoder makes when
 /// it has to tell a message from a byte it does not know.
@@ -260,31 +241,4 @@ test "an unknown error field keeps its code" {
     try testing.expectEqual(@as(u8, 'X'), @backingInt(ErrorField.fromByte('X')));
     // Zero terminates the body rather than naming a field.
     try testing.expect(!isDeclared(ErrorField, ErrorField.fromByte(0)));
-}
-
-test "fixed messages declare their own length" {
-    inline for (.{
-        fixed.sync,
-        fixed.terminate,
-        fixed.flush,
-        fixed.bind_empty,
-        fixed.describe_portal,
-        fixed.execute_portal,
-    }) |message| {
-        const declared = readInt(u32, message[1..5]);
-        try testing.expectEqual(@as(u32, message.len - 1), declared);
-    }
-}
-
-test "fixed messages start with their tag" {
-    inline for (.{
-        fixed.sync,
-        fixed.terminate,
-        fixed.flush,
-        fixed.bind_empty,
-        fixed.describe_portal,
-        fixed.execute_portal,
-    }) |message| {
-        _ = Frontend.fromByte(message[0]);
-    }
 }

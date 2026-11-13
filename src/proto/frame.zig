@@ -16,7 +16,6 @@ const assert = std.debug.assert;
 const mem = std.mem;
 const testing = std.testing;
 
-const messages = @import("messages.zig");
 const readInt = @import("mem.zig").readInt;
 
 /// The largest message the protocol allows. The server's cap is below 2^30
@@ -199,7 +198,8 @@ test "an empty body still ends" {
     // message, and the end arrives as a second event that consumes nothing.
     var decoder: Decoder = .init;
 
-    const first = try decoder.next(messages.fixed.sync[0..]);
+    const sync = [_]u8{ 'S', 0, 0, 0, 4 };
+    const first = try decoder.next(&sync);
     try testing.expectEqual(@as(u32, 5), first.consumed);
     try testing.expectEqual(@as(u32, 4), first.event.header.length);
     try testing.expect(decoder.in_message);
