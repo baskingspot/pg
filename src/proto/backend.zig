@@ -64,10 +64,10 @@ pub const Message = union(messages.Backend) {
         return error.UnknownTag;
     }
 
-    pub fn format(self: Message, writer: *Io.Writer) Io.Writer.Error!void {
-        switch (self) {
-            inline else => |body| try body.format(writer),
-        }
+    pub fn format(self: *const Message, writer: *Io.Writer) Io.Writer.Error!void {
+        try switch (self.*) {
+            inline else => |body| body.format(writer),
+        };
     }
 };
 
@@ -106,28 +106,28 @@ pub const Authentication = union(enum) {
         };
     }
 
-    pub fn format(self: Authentication, writer: *Io.Writer) Io.Writer.Error!void {
-        switch (self) {
-            .ok => try writer.writeAll("Authentication{ .ok }"),
-            .kerberos_v5 => try writer.writeAll("Authentication{ .kerberos_v5 }"),
-            .cleartext_password => try writer.writeAll("Authentication{ .cleartext_password }"),
-            .md5_password => |salt| try writer.print("Authentication{{ .md5_password = {f} }}", .{
+    pub fn format(self: *const Authentication, writer: *Io.Writer) Io.Writer.Error!void {
+        try switch (self.*) {
+            .ok => writer.writeAll("Authentication{ .ok }"),
+            .kerberos_v5 => writer.writeAll("Authentication{ .kerberos_v5 }"),
+            .cleartext_password => writer.writeAll("Authentication{ .cleartext_password }"),
+            .md5_password => |salt| writer.print("Authentication{{ .md5_password = {f} }}", .{
                 print.quoted(&salt),
             }),
-            .gss => try writer.writeAll("Authentication{ .gss }"),
-            .gss_continue => |data| try writer.print("Authentication{{ .gss_continue = {f} }}", .{
+            .gss => writer.writeAll("Authentication{ .gss }"),
+            .gss_continue => |data| writer.print("Authentication{{ .gss_continue = {f} }}", .{
                 print.blob(data),
             }),
-            .sspi => try writer.writeAll("Authentication{ .sspi }"),
-            .sasl => |sasl| try writer.print("Authentication{{ .sasl = {f} }}", .{sasl}),
-            .sasl_continue => |data| try writer.print("Authentication{{ .sasl_continue = {f} }}", .{
+            .sspi => writer.writeAll("Authentication{ .sspi }"),
+            .sasl => |sasl| writer.print("Authentication{{ .sasl = {f} }}", .{sasl}),
+            .sasl_continue => |data| writer.print("Authentication{{ .sasl_continue = {f} }}", .{
                 print.blob(data),
             }),
-            .sasl_final => |data| try writer.print("Authentication{{ .sasl_final = {f} }}", .{
+            .sasl_final => |data| writer.print("Authentication{{ .sasl_final = {f} }}", .{
                 print.blob(data),
             }),
-            .unknown => |code| try writer.print("Authentication{{ .unknown = {d} }}", .{code}),
-        }
+            .unknown => |code| writer.print("Authentication{{ .unknown = {d} }}", .{code}),
+        };
     }
 };
 
@@ -136,11 +136,11 @@ pub const Authentication = union(enum) {
 pub const Sasl = struct {
     mechanisms: []const u8,
 
-    pub fn iterator(self: Sasl) SaslIterator {
+    pub fn iterator(self: *const Sasl) SaslIterator {
         return .{ .reader = .init(self.mechanisms) };
     }
 
-    pub fn format(self: Sasl, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Sasl, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.writeAll("Sasl{ ");
         var it = self.iterator();
         var first = true;
@@ -179,7 +179,7 @@ pub const BackendKeyData = struct {
         };
     }
 
-    pub fn format(self: BackendKeyData, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const BackendKeyData, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("BackendKeyData{{ .process = {d}, .key = {f} }}", .{
             self.process,
             print.blob(self.key),
@@ -280,7 +280,7 @@ pub const CommandComplete = struct {
         return .{ .tag = try wire.takeString(&reader) };
     }
 
-    pub fn format(self: CommandComplete, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const CommandComplete, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("CommandComplete{{ .tag = {f} }}", .{print.quoted(self.tag)});
     }
 };
@@ -312,7 +312,7 @@ pub const ParameterStatus = struct {
         };
     }
 
-    pub fn format(self: ParameterStatus, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const ParameterStatus, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("ParameterStatus{{ .name = {f}, .value = {f} }}", .{
             print.quoted(self.name),
             print.quoted(self.value),
@@ -335,7 +335,7 @@ pub const NotificationResponse = struct {
         };
     }
 
-    pub fn format(self: NotificationResponse, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const NotificationResponse, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("NotificationResponse{{ .channel = {f}, .payload = {f} }}", .{
             print.quoted(self.channel),
             print.quoted(self.payload),
@@ -354,7 +354,7 @@ pub const DataRow = struct {
     }
 
     /// The values, in column order. A null is a SQL NULL.
-    pub fn values(self: DataRow) Values {
+    pub fn values(self: *const DataRow) Values {
         return .{ .reader = .init(self.body[2..]), .left = self.columns };
     }
 
@@ -381,7 +381,7 @@ pub const DataRow = struct {
         }
     };
 
-    pub fn format(self: DataRow, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const DataRow, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("DataRow{{ .columns = {d} }}", .{self.columns});
     }
 };
@@ -396,7 +396,7 @@ pub const RowDescription = struct {
         return .{ .body = body, .fields = try reader.read(u16) };
     }
 
-    pub fn columns(self: RowDescription) Columns {
+    pub fn columns(self: *const RowDescription) Columns {
         return .{ .reader = .init(self.body[2..]), .left = self.fields };
     }
 
@@ -433,7 +433,7 @@ pub const RowDescription = struct {
         }
     };
 
-    pub fn format(self: RowDescription, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const RowDescription, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("RowDescription{{ .fields = {d} }}", .{self.fields});
     }
 };
@@ -448,7 +448,7 @@ pub const ParameterDescription = struct {
         return .{ .body = body, .count = try reader.read(u16) };
     }
 
-    pub fn types(self: ParameterDescription) Types {
+    pub fn types(self: *const ParameterDescription) Types {
         return .{ .reader = .init(self.body[2..]), .left = self.count };
     }
 
@@ -464,7 +464,7 @@ pub const ParameterDescription = struct {
         }
     };
 
-    pub fn format(self: ParameterDescription, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const ParameterDescription, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("ParameterDescription{{ .count = {d} }}", .{self.count});
     }
 };
@@ -484,7 +484,7 @@ pub const NegotiateProtocolVersion = struct {
         return .{ .body = body, .minor = minor, .options = options };
     }
 
-    pub fn unrecognized(self: NegotiateProtocolVersion) Options {
+    pub fn unrecognized(self: *const NegotiateProtocolVersion) Options {
         return .{ .reader = .init(self.body[8..]), .left = self.options };
     }
 
@@ -500,7 +500,7 @@ pub const NegotiateProtocolVersion = struct {
         }
     };
 
-    pub fn format(self: NegotiateProtocolVersion, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const NegotiateProtocolVersion, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("NegotiateProtocolVersion{{ .minor = {d}, .options = {d} }}", .{
             self.minor,
             self.options,
@@ -516,7 +516,7 @@ pub const CopyData = struct {
         return .{ .data = body };
     }
 
-    pub fn format(self: CopyData, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const CopyData, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("CopyData{{ {f} }}", .{print.blob(self.data)});
     }
 };
@@ -542,7 +542,7 @@ fn CopyBody(comptime name: []const u8) type {
 
         /// One format code per column. All of them are text when the overall
         /// format is text.
-        pub fn formats(self: Self) Formats {
+        pub fn formats(self: *const Self) Formats {
             return .{ .reader = .init(self.body[1 + 2 ..]), .left = self.columns };
         }
 
@@ -557,7 +557,7 @@ fn CopyBody(comptime name: []const u8) type {
             }
         };
 
-        pub fn format(self: Self, writer: *Io.Writer) Io.Writer.Error!void {
+        pub fn format(self: *const Self, writer: *Io.Writer) Io.Writer.Error!void {
             try writer.print("{s}{{ .columns = {d} }}", .{ name, self.columns });
         }
     };
@@ -581,11 +581,11 @@ pub const ErrorResponse = struct {
         return .{ .body = body };
     }
 
-    pub fn fields(self: ErrorResponse) error_response.Iterator {
+    pub fn fields(self: *const ErrorResponse) error_response.Iterator {
         return .init(self.body);
     }
 
-    pub fn format(self: ErrorResponse, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const ErrorResponse, writer: *Io.Writer) Io.Writer.Error!void {
         try formatFields("ErrorResponse", self.body, writer);
     }
 };
@@ -599,11 +599,11 @@ pub const NoticeResponse = struct {
         return .{ .body = body };
     }
 
-    pub fn fields(self: NoticeResponse) error_response.Iterator {
+    pub fn fields(self: *const NoticeResponse) error_response.Iterator {
         return .init(self.body);
     }
 
-    pub fn format(self: NoticeResponse, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const NoticeResponse, writer: *Io.Writer) Io.Writer.Error!void {
         try formatFields("NoticeResponse", self.body, writer);
     }
 };
@@ -649,7 +649,7 @@ pub const FunctionCallResponse = struct {
         return .{ .value = try reader.readSlice(@intCast(length)) };
     }
 
-    pub fn format(self: FunctionCallResponse, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const FunctionCallResponse, writer: *Io.Writer) Io.Writer.Error!void {
         if (self.value) |value| {
             try writer.print("FunctionCallResponse{{ {f} }}", .{print.blob(value)});
         } else {
@@ -661,7 +661,7 @@ pub const FunctionCallResponse = struct {
 test "a row keeps its values and says which are null" {
     // Two columns: "one", then a NULL.
     const body = "\x00\x02" ++ "\x00\x00\x00\x03one" ++ "\xff\xff\xff\xff";
-    const row = try DataRow.decode(body);
+    const row: DataRow = try .decode(body);
     try testing.expectEqual(@as(u16, 2), row.columns);
 
     var values = row.values();
@@ -673,7 +673,7 @@ test "a row keeps its values and says which are null" {
 test "a length below -1 is refused, not cast" {
     // -2 would become a huge slice length on the cast.
     const body = "\x00\x01" ++ "\xff\xff\xff\xfe";
-    const row = try DataRow.decode(body);
+    const row: DataRow = try .decode(body);
     var values = row.values();
     try testing.expectError(error.UnexpectedEof, values.next());
 }
@@ -687,7 +687,7 @@ test "a row description names its columns" {
         "\x00\x04" ++ // size
         "\xff\xff\xff\xff" ++ // modifier
         "\x00\x00"; // text
-    const description = try RowDescription.decode(body);
+    const description: RowDescription = try .decode(body);
     try testing.expectEqual(@as(u16, 1), description.fields);
 
     var columns = description.columns();
@@ -711,13 +711,13 @@ test "authentication says which login method is next" {
     );
 
     // The mechanisms are a list of null-terminated names.
-    const sasl = try Authentication.decode("\x00\x00\x00\x0aSCRAM-SHA-256\x00\x00");
+    const sasl: Authentication = try .decode("\x00\x00\x00\x0aSCRAM-SHA-256\x00\x00");
     var mechanisms = sasl.sasl.iterator();
     try testing.expectEqualStrings("SCRAM-SHA-256", (try mechanisms.next()).?);
     try testing.expectEqual(@as(?[]const u8, null), try mechanisms.next());
 
     // A code this library does not name stays a number rather than panicking.
-    const unknown = try Authentication.decode("\x00\x00\x00\x63");
+    const unknown: Authentication = try .decode("\x00\x00\x00\x63");
     try testing.expectEqual(@as(u32, 99), unknown.unknown);
 }
 
@@ -738,7 +738,7 @@ test "a message dispatches on its tag" {
 
 test "an error prints its code and message" {
     const body = "S" ++ "ERROR\x00" ++ "C" ++ "42P01\x00" ++ "M" ++ "no such table\x00" ++ "\x00";
-    const message = try Message.decode('E', body);
+    const message: Message = try .decode('E', body);
     try testing.expectFmt(
         "ErrorResponse{ .code = \"42P01\", .message = \"no such table\" }",
         "{f}",
@@ -755,7 +755,7 @@ test "the messages with no body print their names" {
 
 test "copy responses carry the formats of their columns" {
     const body = "\x00" ++ "\x00\x02" ++ "\x00\x00" ++ "\x00\x01";
-    const out = try Message.decode('H', body);
+    const out: Message = try .decode('H', body);
     try testing.expectEqual(@as(u8, 0), out.copy_out_response.overall);
     try testing.expectEqual(@as(u16, 2), out.copy_out_response.columns);
 
@@ -767,7 +767,7 @@ test "copy responses carry the formats of their columns" {
 
 test "a parameter description is a list of type OIDs" {
     const body = "\x00\x02" ++ "\x00\x00\x00\x17" ++ "\x00\x00\x00\x19";
-    const description = try Message.decode('t', body);
+    const description: Message = try .decode('t', body);
     var types = description.parameter_description.types();
     try testing.expectEqual(@as(?u32, 23), try types.next());
     try testing.expectEqual(@as(?u32, 25), try types.next());
@@ -776,7 +776,7 @@ test "a parameter description is a list of type OIDs" {
 
 test "the cancel key is as long as the frame says" {
     const body = "\x00\x00\x22\xa0" ++ "\xd9\x0c\xae\xdb";
-    const key = try BackendKeyData.decode(body);
+    const key: BackendKeyData = try .decode(body);
     try testing.expectEqual(@as(u32, 8864), key.process);
     try testing.expectEqualSlices(u8, "\xd9\x0c\xae\xdb", key.key);
 

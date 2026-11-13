@@ -41,7 +41,7 @@ pub const Version = struct {
         return .{ .wire = wire };
     }
 
-    pub fn fromU32(word: u32) Version {
+    pub inline fn fromU32(word: u32) Version {
         var wire: [4]u8 = undefined;
         writeInt(u32, &wire, word);
         return .{ .wire = wire };

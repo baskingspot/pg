@@ -17,7 +17,7 @@ pub fn quoted(bytes: []const u8) Quoted {
 pub const Quoted = struct {
     bytes: []const u8,
 
-    pub fn format(self: Quoted, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Quoted, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.writeByte('"');
         try std.zig.stringEscape(self.bytes, writer);
         try writer.writeByte('"');
@@ -32,7 +32,7 @@ pub fn blob(bytes: []const u8) Blob {
 pub const Blob = struct {
     len: usize,
 
-    pub fn format(self: Blob, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Blob, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("<{d} bytes>", .{self.len});
     }
 };

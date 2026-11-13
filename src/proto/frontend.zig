@@ -51,11 +51,11 @@ fn writeFormats(e: *Encoder, formats: []const Format) Error!void {
 pub const Query = struct {
     sql: []const u8,
 
-    pub fn write(self: Query, e: *Encoder) Error!void {
+    pub fn write(self: *const Query, e: *Encoder) Error!void {
         try e.string(self.sql);
     }
 
-    pub fn format(self: Query, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Query, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("Query{{ .sql = {f} }}", .{print.quoted(self.sql)});
     }
 };
@@ -68,14 +68,14 @@ pub const Parse = struct {
     /// means unspecified and is legal.
     types: []const u32 = &.{},
 
-    pub fn write(self: Parse, e: *Encoder) Error!void {
+    pub fn write(self: *const Parse, e: *Encoder) Error!void {
         try e.string(self.statement);
         try e.string(self.sql);
         try e.int(u16, @intCast(self.types.len));
         for (self.types) |oid| try e.int(u32, oid);
     }
 
-    pub fn format(self: Parse, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Parse, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("Parse{{ .statement = {f}, .sql = {f}, .types = {{", .{
             print.quoted(self.statement),
             print.quoted(self.sql),
@@ -99,7 +99,7 @@ pub const Bind = struct {
     /// The same three shapes as `formats`, for the result columns.
     result_formats: []const Format = &.{},
 
-    pub fn write(self: Bind, e: *Encoder) Error!void {
+    pub fn write(self: *const Bind, e: *Encoder) Error!void {
         try e.string(self.portal);
         try e.string(self.statement);
 
@@ -113,7 +113,7 @@ pub const Bind = struct {
         try writeFormats(e, self.result_formats);
     }
 
-    pub fn format(self: Bind, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Bind, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print(
             "Bind{{ .portal = {f}, .statement = {f}, " ++
                 ".formats = {d}, .parameters = {d}, .result_formats = {d} }}",
@@ -133,12 +133,12 @@ pub const Close = struct {
     target: Target,
     name: []const u8 = "",
 
-    pub fn write(self: Close, e: *Encoder) Error!void {
+    pub fn write(self: *const Close, e: *Encoder) Error!void {
         try e.int(u8, @backingInt(self.target));
         try e.string(self.name);
     }
 
-    pub fn format(self: Close, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Close, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("Close{{ .target = .{t}, .name = {f} }}", .{
             self.target,
             print.quoted(self.name),
@@ -151,12 +151,12 @@ pub const Describe = struct {
     target: Target,
     name: []const u8 = "",
 
-    pub fn write(self: Describe, e: *Encoder) Error!void {
+    pub fn write(self: *const Describe, e: *Encoder) Error!void {
         try e.int(u8, @backingInt(self.target));
         try e.string(self.name);
     }
 
-    pub fn format(self: Describe, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Describe, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("Describe{{ .target = .{t}, .name = {f} }}", .{
             self.target,
             print.quoted(self.name),
@@ -170,12 +170,12 @@ pub const Execute = struct {
     /// Zero means no limit.
     max_rows: u32 = 0,
 
-    pub fn write(self: Execute, e: *Encoder) Error!void {
+    pub fn write(self: *const Execute, e: *Encoder) Error!void {
         try e.string(self.portal);
         try e.int(u32, self.max_rows);
     }
 
-    pub fn format(self: Execute, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Execute, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("Execute{{ .portal = {f}, .max_rows = {d} }}", .{
             print.quoted(self.portal),
             self.max_rows,
@@ -191,7 +191,7 @@ pub const FunctionCall = struct {
     arguments: []const ?[]const u8 = &.{},
     result_format: Format = .text,
 
-    pub fn write(self: FunctionCall, e: *Encoder) Error!void {
+    pub fn write(self: *const FunctionCall, e: *Encoder) Error!void {
         try e.int(u32, self.function);
         try e.int(u16, @intCast(self.formats.len));
         try writeFormats(e, self.formats);
@@ -200,7 +200,7 @@ pub const FunctionCall = struct {
         try e.int(u16, @backingInt(self.result_format));
     }
 
-    pub fn format(self: FunctionCall, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const FunctionCall, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("FunctionCall{{ .function = {d}, .arguments = {d} }}", .{
             self.function,
             self.arguments.len,
@@ -246,11 +246,11 @@ pub const Terminate = struct {
 pub const Password = struct {
     password: []const u8,
 
-    pub fn write(self: Password, e: *Encoder) Error!void {
+    pub fn write(self: *const Password, e: *Encoder) Error!void {
         try e.string(self.password);
     }
 
-    pub fn format(self: Password, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const Password, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("Password{{ {f} }}", .{print.blob(self.password)});
     }
 };
@@ -259,11 +259,11 @@ pub const Password = struct {
 pub const CopyData = struct {
     data: []const u8,
 
-    pub fn write(self: CopyData, e: *Encoder) Error!void {
+    pub fn write(self: *const CopyData, e: *Encoder) Error!void {
         try e.bytes(self.data);
     }
 
-    pub fn format(self: CopyData, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const CopyData, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("CopyData{{ {f} }}", .{print.blob(self.data)});
     }
 };
@@ -283,11 +283,11 @@ pub const CopyDone = struct {
 pub const CopyFail = struct {
     reason: []const u8,
 
-    pub fn write(self: CopyFail, e: *Encoder) Error!void {
+    pub fn write(self: *const CopyFail, e: *Encoder) Error!void {
         try e.string(self.reason);
     }
 
-    pub fn format(self: CopyFail, writer: *Io.Writer) Io.Writer.Error!void {
+    pub fn format(self: *const CopyFail, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("CopyFail{{ .reason = {f} }}", .{print.quoted(self.reason)});
     }
 };
@@ -312,8 +312,8 @@ pub const Message = union(messages.Frontend) {
     copy_fail: CopyFail,
     password: Password,
 
-    pub fn encode(self: Message, e: *Encoder) Error![]const u8 {
-        return switch (self) {
+    pub fn encode(self: *const Message, e: *Encoder) Error![]const u8 {
+        return switch (self.*) {
             inline else => |body, tag| blk: {
                 try e.start(tag);
                 try body.write(e);
@@ -322,10 +322,10 @@ pub const Message = union(messages.Frontend) {
         };
     }
 
-    pub fn format(self: Message, writer: *Io.Writer) Io.Writer.Error!void {
-        switch (self) {
-            inline else => |body| try body.format(writer),
-        }
+    pub fn format(self: *const Message, writer: *Io.Writer) Io.Writer.Error!void {
+        try switch (self.*) {
+            inline else => |body| body.format(writer),
+        };
     }
 };
 

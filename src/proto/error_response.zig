@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const testing = std.testing;
+
 const atoi = @import("stdx").fmt.atoi;
 
 const messages = @import("messages.zig");
@@ -24,7 +25,7 @@ pub const Field = struct {
     /// The value bytes, borrowed from the message body.
     value: []const u8,
 
-    pub fn kind(self: Field) messages.ErrorField {
+    pub fn kind(self: *const Field) messages.ErrorField {
         return .fromByte(self.code);
     }
 
@@ -34,7 +35,7 @@ pub const Field = struct {
     /// `+`, a `-`, or a space is `error.InvalidCharacter`, and a value too
     /// large for `u32` is `error.Overflow`. `std.fmt.parseInt` takes all of
     /// those, which would turn a server bug into a position.
-    pub fn number(self: Field) error{ InvalidCharacter, Overflow }!u32 {
+    pub fn number(self: *const Field) error{ InvalidCharacter, Overflow }!u32 {
         return atoi(u32, self.value);
     }
 };
