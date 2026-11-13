@@ -11,6 +11,7 @@
 const std = @import("std");
 const testing = std.testing;
 
+const frontend = @import("frontend.zig");
 const messages = @import("messages.zig");
 const wire = @import("wire.zig");
 const writeInt = @import("mem.zig").writeInt;
@@ -68,25 +69,28 @@ pub const Encoder = struct {
     }
 };
 
-/// How many bytes a message takes, by encoding it.
+/// How many bytes a frontend message takes, by encoding it.
 ///
 /// The scratch buffer is a bound on what can be a comptime constant rather
 /// than a protocol limit; a message a caller assembles at runtime is written
 /// straight into the caller's buffer.
-fn encodedLen(comptime body: anytype) u32 {
+fn encodedLen(comptime message: frontend.Message) u32 {
     var scratch: [8192]u8 = undefined;
     var encoder: Encoder = .init;
     encoder.reset(&scratch);
-    _ = body.encode(&encoder) catch @compileError("message exceeds the comptime buffer");
+    _ = message.encode(&encoder) catch @compileError("message exceeds the comptime buffer");
     return @intCast(encoder.writer.end);
 }
 
-/// A message's bytes, built at comptime.
-pub fn build(comptime body: anytype) [encodedLen(body)]u8 {
-    var bytes: [encodedLen(body)]u8 = undefined;
+/// A frontend message's bytes, built at comptime.
+///
+/// The parameter is the union rather than `anytype` so a call site can name
+/// the arm: `build(.{ .query = .{ .sql = "select 1" } })`.
+pub fn build(comptime message: frontend.Message) [encodedLen(message)]u8 {
+    var bytes: [encodedLen(message)]u8 = undefined;
     var encoder: Encoder = .init;
     encoder.reset(&bytes);
-    _ = body.encode(&encoder) catch unreachable;
+    _ = message.encode(&encoder) catch unreachable;
     return bytes;
 }
 

@@ -84,15 +84,29 @@ pub const Bind = struct {
     }
 };
 
+/// Whether a name refers to a prepared statement or to a portal.
+pub const Target = enum(u8) {
+    statement = 'S',
+    portal = 'P',
+};
+
+/// `C`. Drop a prepared statement or a portal.
+pub const Close = struct {
+    target: Target,
+    name: []const u8 = "",
+
+    pub fn encode(self: Close, e: *Encoder) Error![]const u8 {
+        try e.start(.close);
+        try e.int(u8, @backingInt(self.target));
+        try e.string(self.name);
+        return e.finish();
+    }
+};
+
 /// `D`. Ask for a statement's or a portal's description.
 pub const Describe = struct {
     target: Target,
     name: []const u8 = "",
-
-    pub const Target = enum(u8) {
-        statement = 'S',
-        portal = 'P',
-    };
 
     pub fn encode(self: Describe, e: *Encoder) Error![]const u8 {
         try e.start(.describe);
@@ -182,22 +196,48 @@ pub const CopyFail = struct {
     }
 };
 
+/// A frontend message, one per tag a client sends.
+///
+/// The union is what makes `build` strongly typed: a call site writes
+/// `.query = .{ .sql = "select 1" }` and the payload type comes from the arm.
+pub const Message = union(enum) {
+    bind: Bind,
+    close: Close,
+    copy_data: CopyData,
+    copy_done: CopyDone,
+    copy_fail: CopyFail,
+    describe: Describe,
+    execute: Execute,
+    flush: Flush,
+    parse: Parse,
+    password: Password,
+    query: Query,
+    sync: Sync,
+    terminate: Terminate,
+
+    pub fn encode(self: Message, e: *Encoder) Error![]const u8 {
+        return switch (self) {
+            inline else => |body| body.encode(e),
+        };
+    }
+};
+
 /// Messages whose bytes never vary, built by running their encoder at comptime.
 pub const fixed = struct {
-    pub const sync = write.build(Sync{});
-    pub const flush = write.build(Flush{});
-    pub const terminate = write.build(Terminate{});
-    pub const copy_done = write.build(CopyDone{});
+    pub const sync = write.build(.{ .sync = .{} });
+    pub const flush = write.build(.{ .flush = .{} });
+    pub const terminate = write.build(.{ .terminate = .{} });
+    pub const copy_done = write.build(.{ .copy_done = .{} });
 
     /// Bind the unnamed portal to the unnamed statement, with no parameters
     /// and no format codes.
-    pub const bind_empty = write.build(Bind{});
+    pub const bind_empty = write.build(.{ .bind = .{} });
 
     /// Describe the unnamed portal.
-    pub const describe_portal = write.build(Describe{ .target = .portal });
+    pub const describe_portal = write.build(.{ .describe = .{ .target = .portal } });
 
     /// Execute the unnamed portal with no row limit.
-    pub const execute_portal = write.build(Execute{});
+    pub const execute_portal = write.build(.{ .execute = .{} });
 };
 
 test "the comptime bytes are the runtime bytes" {
@@ -206,7 +246,8 @@ test "the comptime bytes are the runtime bytes" {
     encoder.reset(&buffer);
 
     const query: Query = .{ .sql = "select 1" };
-    try testing.expectEqualSlices(u8, &write.build(query), try query.encode(&encoder));
+    const built = write.build(.{ .query = query });
+    try testing.expectEqualSlices(u8, &built, try query.encode(&encoder));
 }
 
 test "the fixed messages are what their encoders produce" {
@@ -223,6 +264,20 @@ test "the fixed messages are what their encoders produce" {
     );
     try testing.expectEqualSlices(u8, &.{ 'D', 0, 0, 0, 6, 'P', 0 }, &fixed.describe_portal);
     try testing.expectEqualSlices(u8, &.{ 'E', 0, 0, 0, 9, 0, 0, 0, 0, 0 }, &fixed.execute_portal);
+}
+
+test "the union names the arm, and the bytes follow" {
+    const built = write.build(.{ .query = .{ .sql = "select 1" } });
+    try testing.expectEqualSlices(u8, "Q\x00\x00\x00\x0dselect 1\x00", &built);
+}
+
+test "close names a statement or a portal" {
+    var buffer: [32]u8 = undefined;
+    var encoder: Encoder = .init;
+    encoder.reset(&buffer);
+
+    const close: Close = .{ .target = .statement, .name = "s" };
+    try testing.expectEqualSlices(u8, "C\x00\x00\x00\x07Ss\x00", try close.encode(&encoder));
 }
 
 test "a query is a tag, a length, and the statement" {
