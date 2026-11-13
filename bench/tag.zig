@@ -25,8 +25,12 @@ const enums = std.enums;
 ///
 /// The table is what `fromByte` does, and `fromByte` is `inline`: as a plain
 /// call it measured 1078 ns against 366, because the error union and the call
-/// cost more than the lookup. Through `fromByte` on the miss input, before and
-/// after the table and the inline: 1201 ns and 358 ns.
+/// cost more than the lookup.
+///
+/// Through `fromByte` on the miss input: 1201 ns as a linear scan behind a
+/// plain call, 358 ns as a table of `?Backend` behind an inline one, 312 ns
+/// with the sentinel byte rather than the optional. At 312 the hit and miss
+/// inputs cost the same, so what is left is one indexed load and one compare.
 ///
 /// Every tag the backend can send, repeated. The hit path, and what a working
 /// connection delivers.

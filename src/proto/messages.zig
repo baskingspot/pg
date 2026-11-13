@@ -22,17 +22,39 @@ const readInt = @import("mem.zig").readInt;
 /// A byte-to-message lookup built from the enum itself.
 ///
 /// `std.enums.fromInt` is a linear scan over every variant for an exhaustive
-/// enum, which measured at 1201 ns for 1024 bytes against 362 ns for this
-/// table, and a hand-written switch came in at 908 ns because its arms compile
-/// to an indirect branch. Built from `std.enums.values`, so a new variant
-/// cannot be left out.
-fn tableOf(comptime E: type) [256]?E {
-    @setEvalBranchQuota(2_000);
-    var table: [256]?E = @splat(null);
-    for (enums.values(E)) |value| {
-        table[@backingInt(value)] = value;
-    }
-    return table;
+/// enum, and a hand-written switch compiles to an indirect branch the
+/// predictor cannot learn. This is one indexed load either way. Built from
+/// `std.enums.values`, so a new variant cannot be left out.
+///
+/// This returns a type rather than a function: a function value made the
+/// table a capture of a comptime local, and the lookup cost 3984 ns per 1024
+/// bytes instead of 312. As a namespace const the table is one array.
+fn TableOf(comptime E: type) type {
+    const tag_type = @typeInfo(E).@"enum".tag_type;
+    if (tag_type != u8) @compileError(@typeName(E) ++ ": a message tag is one byte");
+
+    return struct {
+        /// The entry for a byte that names no message. No message uses the
+        /// highest byte, so the table is 256 bytes of tag rather than 512
+        /// bytes of tag and a null flag.
+        const unknown = std.math.maxInt(tag_type);
+
+        const table: [256]tag_type = blk: {
+            @setEvalBranchQuota(2_000);
+            var built: [256]tag_type = @splat(unknown);
+            for (enums.values(E)) |value| {
+                const tag: tag_type = @backingInt(value);
+                if (tag == unknown) @compileError(@typeName(E) ++ " uses the sentinel byte");
+                built[tag] = tag;
+            }
+            break :blk built;
+        };
+
+        pub inline fn get(byte: u8) ?E {
+            const tag = table[byte];
+            return if (tag == unknown) null else @fromBackingInt(tag);
+        }
+    };
 }
 
 /// Frontend to backend messages. A client encodes these; only a server or a
@@ -56,10 +78,8 @@ pub const Frontend = enum(u8) {
     password = 'p',
 
     pub inline fn fromByte(byte: u8) error{UnknownTag}!Frontend {
-        return table[byte] orelse error.UnknownTag;
+        return TableOf(Frontend).get(byte) orelse error.UnknownTag;
     }
-
-    const table: [256]?Frontend = tableOf(Frontend);
 
     pub fn toByte(self: Frontend) u8 {
         return @backingInt(self);
@@ -97,10 +117,8 @@ pub const Backend = enum(u8) {
     row_description = 'T',
 
     pub inline fn fromByte(byte: u8) error{UnknownTag}!Backend {
-        return table[byte] orelse error.UnknownTag;
+        return TableOf(Backend).get(byte) orelse error.UnknownTag;
     }
-
-    const table: [256]?Backend = tableOf(Backend);
 
     pub fn toByte(self: Backend) u8 {
         return @backingInt(self);
@@ -117,10 +135,8 @@ pub const Transaction = enum(u8) {
     failed = 'E',
 
     pub inline fn fromByte(byte: u8) error{UnknownTag}!Transaction {
-        return table[byte] orelse error.UnknownTag;
+        return TableOf(Transaction).get(byte) orelse error.UnknownTag;
     }
-
-    const table: [256]?Transaction = tableOf(Transaction);
 };
 
 /// The first int32 of an `authentication` message.
@@ -181,7 +197,7 @@ pub const ErrorField = enum(u8) {
     routine = 'R',
 
     pub fn fromByte(byte: u8) ?ErrorField {
-        return enums.fromInt(ErrorField, byte);
+        return TableOf(ErrorField).get(byte);
     }
 };
 
