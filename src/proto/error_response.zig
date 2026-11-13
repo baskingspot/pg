@@ -15,6 +15,7 @@ const testing = std.testing;
 const atoi = @import("stdx").fmt.atoi;
 
 const messages = @import("messages.zig");
+const sqlstate = @import("sqlstate.zig");
 const wire = @import("wire.zig");
 
 pub const Field = struct {
@@ -27,6 +28,15 @@ pub const Field = struct {
 
     pub fn kind(self: *const Field) messages.ErrorField {
         return .fromByte(self.code);
+    }
+
+    /// The code, when this field carries one.
+    ///
+    /// A field of the right kind with the wrong length is a malformed message,
+    /// so this says null rather than inventing a code.
+    pub fn state(self: Field) ?sqlstate.SqlState {
+        if (self.kind() != .code) return null;
+        return sqlstate.SqlState.fromSlice(self.value);
     }
 
     /// The value as an integer, for the `P` and `L` fields.
@@ -136,6 +146,19 @@ test "a field value takes digits and nothing else" {
         const field: Field = .{ .code = 'P', .value = case.value };
         try testing.expectEqual(case.want, field.number());
     }
+}
+
+test "a field yields its SQLSTATE" {
+    const body = "S" ++ "ERROR\x00" ++ "C" ++ "23505\x00" ++ "\x00";
+    var it = fields(body);
+    _ = (try it.next()).?;
+
+    const code = (try it.next()).?;
+    try testing.expectEqual(sqlstate.SqlState.unique_violation, code.state().?);
+
+    // A field that is not the code has no state, even if it looks like one.
+    const message: Field = .{ .code = 'M', .value = "23505" };
+    try testing.expectEqual(@as(?sqlstate.SqlState, null), message.state());
 }
 
 test "the terminator alone is no fields" {

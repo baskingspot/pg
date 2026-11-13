@@ -35,6 +35,7 @@ pub const frame = @import("proto/frame.zig");
 pub const frontend = @import("proto/frontend.zig");
 pub const messages = @import("proto/messages.zig");
 pub const replication = @import("proto/replication.zig");
+pub const sqlstate = @import("proto/sqlstate.zig");
 pub const startup = @import("proto/startup.zig");
 pub const version = @import("proto/version.zig");
 pub const wire = @import("proto/wire.zig");
