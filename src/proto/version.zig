@@ -37,7 +37,7 @@ pub const Version = struct {
     }
 
     /// The wire form, for a reader that already has four bytes in hand.
-    pub fn fromBytes(wire: [4]u8) Version {
+    pub inline fn fromBytes(wire: [4]u8) Version {
         return .{ .wire = wire };
     }
 

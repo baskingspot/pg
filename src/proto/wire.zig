@@ -83,3 +83,55 @@ test "the reader's own shapes still hold" {
     try testing.expectEqualStrings("abc", try r.readSlice(3));
     try testing.expectEqualStrings("defg", r.remaining());
 }
+
+/// A counted list of 16-bit values, such as format codes.
+pub const U16s = struct {
+    reader: Reader,
+    left: u16,
+
+    pub fn next(self: *U16s) Error!?u16 {
+        if (self.left == 0) return null;
+        self.left -= 1;
+        const value = try self.reader.read(u16);
+        return value;
+    }
+};
+
+/// A counted list of 32-bit values, such as type OIDs.
+pub const U32s = struct {
+    reader: Reader,
+    left: u16,
+
+    pub fn next(self: *U32s) Error!?u32 {
+        if (self.left == 0) return null;
+        self.left -= 1;
+        const value = try self.reader.read(u32);
+        return value;
+    }
+};
+
+/// A counted list of values, each an int32 length and that many bytes, with -1
+/// for a null. This is how Bind sends its parameters and how DataRow sends its
+/// columns.
+pub const Values = struct {
+    reader: Reader,
+    left: u16,
+
+    pub const Value = struct {
+        /// Null for a SQL NULL, which the wire sends as a length of -1.
+        bytes: ?[]const u8,
+    };
+
+    pub fn next(self: *Values) Error!?Value {
+        if (self.left == 0) return null;
+        self.left -= 1;
+
+        const length = try self.reader.read(i32);
+        // -1 is a null, and the wire has no other negative length. Saying so
+        // here is what keeps a cast from turning -2 into a huge slice.
+        if (length == -1) return .{ .bytes = null };
+        if (length < 0) return Error.UnexpectedEof;
+
+        return .{ .bytes = try self.reader.readSlice(@intCast(length)) };
+    }
+};

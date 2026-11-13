@@ -34,10 +34,21 @@ pub const Encoder = struct {
         self.* = .{ .writer = .init(buffer), .at = 0 };
     }
 
-    /// Start a message: the tag, then four bytes of length to fill later.
+    /// Start a frontend message: the tag, then four bytes of length to fill
+    /// later.
     pub fn start(self: *Encoder, tag: messages.Frontend) Error!void {
+        try self.begin(@backingInt(tag));
+    }
+
+    /// Start a backend message. The same layout, on the other side of the
+    /// connection.
+    pub fn startBackend(self: *Encoder, tag: messages.Backend) Error!void {
+        try self.begin(@backingInt(tag));
+    }
+
+    fn begin(self: *Encoder, tag: u8) Error!void {
         self.at = @intCast(self.writer.end);
-        try self.writer.append(u8, @backingInt(tag));
+        try self.writer.append(u8, tag);
         _ = try self.writer.reserve(4);
     }
 

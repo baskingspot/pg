@@ -14,10 +14,15 @@ const testing = std.testing;
 const Io = std.Io;
 
 const error_response = @import("error_response.zig");
+const write = @import("write.zig");
+const Encoder = write.Encoder;
 const messages = @import("messages.zig");
 const print = @import("print.zig");
 const wire = @import("wire.zig");
 pub const Error = wire.Error;
+
+/// The encoder's error, which is the buffer running out.
+const WriteError = write.Error;
 
 /// One decoded backend message.
 pub const Message = union(messages.Backend) {
@@ -60,8 +65,20 @@ pub const Message = union(messages.Backend) {
             if (@backingInt(@field(messages.Backend, name)) == tag) {
                 return @unionInit(Message, name, try Arm.decode(body));
             }
+        } else {
+            @branchHint(.unlikely);
+            return error.UnknownTag;
         }
-        return error.UnknownTag;
+    }
+
+    pub fn encode(self: *const Message, e: *Encoder) WriteError![]const u8 {
+        return switch (self.*) {
+            inline else => |body, tag| blk: {
+                try e.startBackend(tag);
+                try body.write(e);
+                break :blk e.finish();
+            },
+        };
     }
 
     pub fn format(self: *const Message, writer: *Io.Writer) Io.Writer.Error!void {
@@ -102,8 +119,42 @@ pub const Authentication = union(enum) {
             .sasl => .{ .sasl = .{ .mechanisms = reader.remaining() } },
             .sasl_continue => .{ .sasl_continue = reader.remaining() },
             .sasl_final => .{ .sasl_final = reader.remaining() },
-            else => .{ .unknown = code },
+            else => blk: {
+                @branchHint(.unlikely);
+                break :blk .{ .unknown = code };
+            },
         };
+    }
+
+    pub fn write(self: *const Authentication, e: *Encoder) WriteError!void {
+        switch (self.*) {
+            .ok => try e.int(u32, @backingInt(messages.Auth.ok)),
+            .kerberos_v5 => try e.int(u32, @backingInt(messages.Auth.kerberos_v5)),
+            .cleartext_password => try e.int(u32, @backingInt(messages.Auth.cleartext_password)),
+            .md5_password => |salt| {
+                try e.int(u32, @backingInt(messages.Auth.md5_password));
+                try e.bytes(&salt);
+            },
+            .gss => try e.int(u32, @backingInt(messages.Auth.gss)),
+            .gss_continue => |data| {
+                try e.int(u32, @backingInt(messages.Auth.gss_continue));
+                try e.bytes(data);
+            },
+            .sspi => try e.int(u32, @backingInt(messages.Auth.sspi)),
+            .sasl => |sasl| {
+                try e.int(u32, @backingInt(messages.Auth.sasl));
+                try e.bytes(sasl.mechanisms);
+            },
+            .sasl_continue => |data| {
+                try e.int(u32, @backingInt(messages.Auth.sasl_continue));
+                try e.bytes(data);
+            },
+            .sasl_final => |data| {
+                try e.int(u32, @backingInt(messages.Auth.sasl_final));
+                try e.bytes(data);
+            },
+            .unknown => |code| try e.int(u32, code),
+        }
     }
 
     pub fn format(self: *const Authentication, writer: *Io.Writer) Io.Writer.Error!void {
@@ -179,6 +230,11 @@ pub const BackendKeyData = struct {
         };
     }
 
+    pub fn write(self: *const BackendKeyData, e: *Encoder) WriteError!void {
+        try e.int(u32, self.process);
+        try e.bytes(self.key);
+    }
+
     pub fn format(self: *const BackendKeyData, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("BackendKeyData{{ .process = {d}, .key = {f} }}", .{
             self.process,
@@ -194,6 +250,10 @@ pub const ParseComplete = struct {
         return .{};
     }
 
+    pub fn write(_: *const ParseComplete, e: *Encoder) WriteError!void {
+        _ = e;
+    }
+
     pub fn format(_: ParseComplete, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.writeAll("ParseComplete");
     }
@@ -204,6 +264,10 @@ pub const BindComplete = struct {
     pub fn decode(body: []const u8) Error!BindComplete {
         if (body.len != 0) return error.UnexpectedEof;
         return .{};
+    }
+
+    pub fn write(_: *const BindComplete, e: *Encoder) WriteError!void {
+        _ = e;
     }
 
     pub fn format(_: BindComplete, writer: *Io.Writer) Io.Writer.Error!void {
@@ -218,6 +282,10 @@ pub const CloseComplete = struct {
         return .{};
     }
 
+    pub fn write(_: *const CloseComplete, e: *Encoder) WriteError!void {
+        _ = e;
+    }
+
     pub fn format(_: CloseComplete, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.writeAll("CloseComplete");
     }
@@ -228,6 +296,10 @@ pub const NoData = struct {
     pub fn decode(body: []const u8) Error!NoData {
         if (body.len != 0) return error.UnexpectedEof;
         return .{};
+    }
+
+    pub fn write(_: *const NoData, e: *Encoder) WriteError!void {
+        _ = e;
     }
 
     pub fn format(_: NoData, writer: *Io.Writer) Io.Writer.Error!void {
@@ -242,6 +314,10 @@ pub const EmptyQueryResponse = struct {
         return .{};
     }
 
+    pub fn write(_: *const EmptyQueryResponse, e: *Encoder) WriteError!void {
+        _ = e;
+    }
+
     pub fn format(_: EmptyQueryResponse, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.writeAll("EmptyQueryResponse");
     }
@@ -254,6 +330,10 @@ pub const PortalSuspended = struct {
         return .{};
     }
 
+    pub fn write(_: *const PortalSuspended, e: *Encoder) WriteError!void {
+        _ = e;
+    }
+
     pub fn format(_: PortalSuspended, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.writeAll("PortalSuspended");
     }
@@ -264,6 +344,10 @@ pub const CopyDone = struct {
     pub fn decode(body: []const u8) Error!CopyDone {
         if (body.len != 0) return error.UnexpectedEof;
         return .{};
+    }
+
+    pub fn write(_: *const CopyDone, e: *Encoder) WriteError!void {
+        _ = e;
     }
 
     pub fn format(_: CopyDone, writer: *Io.Writer) Io.Writer.Error!void {
@@ -280,6 +364,10 @@ pub const CommandComplete = struct {
         return .{ .tag = try wire.takeString(&reader) };
     }
 
+    pub fn write(self: *const CommandComplete, e: *Encoder) WriteError!void {
+        try e.string(self.tag);
+    }
+
     pub fn format(self: *const CommandComplete, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("CommandComplete{{ .tag = {f} }}", .{print.quoted(self.tag)});
     }
@@ -292,6 +380,10 @@ pub const ReadyForQuery = struct {
     pub fn decode(body: []const u8) Error!ReadyForQuery {
         var reader: wire.Reader = .init(body);
         return .{ .status = messages.Transaction.fromByte(try reader.read(u8)) };
+    }
+
+    pub fn write(self: *const ReadyForQuery, e: *Encoder) WriteError!void {
+        try e.int(u8, @backingInt(self.status));
     }
 
     pub fn format(self: ReadyForQuery, writer: *Io.Writer) Io.Writer.Error!void {
@@ -310,6 +402,11 @@ pub const ParameterStatus = struct {
             .name = try wire.takeString(&reader),
             .value = try wire.takeString(&reader),
         };
+    }
+
+    pub fn write(self: *const ParameterStatus, e: *Encoder) WriteError!void {
+        try e.string(self.name);
+        try e.string(self.value);
     }
 
     pub fn format(self: *const ParameterStatus, writer: *Io.Writer) Io.Writer.Error!void {
@@ -333,6 +430,12 @@ pub const NotificationResponse = struct {
             .channel = try wire.takeString(&reader),
             .payload = try wire.takeString(&reader),
         };
+    }
+
+    pub fn write(self: *const NotificationResponse, e: *Encoder) WriteError!void {
+        try e.int(u32, self.process);
+        try e.string(self.channel);
+        try e.string(self.payload);
     }
 
     pub fn format(self: *const NotificationResponse, writer: *Io.Writer) Io.Writer.Error!void {
@@ -380,6 +483,10 @@ pub const DataRow = struct {
             return .{ .bytes = try self.reader.readSlice(@intCast(length)) };
         }
     };
+
+    pub fn write(self: *const DataRow, e: *Encoder) WriteError!void {
+        try e.bytes(self.body);
+    }
 
     pub fn format(self: *const DataRow, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("DataRow{{ .columns = {d} }}", .{self.columns});
@@ -433,6 +540,10 @@ pub const RowDescription = struct {
         }
     };
 
+    pub fn write(self: *const RowDescription, e: *Encoder) WriteError!void {
+        try e.bytes(self.body);
+    }
+
     pub fn format(self: *const RowDescription, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("RowDescription{{ .fields = {d} }}", .{self.fields});
     }
@@ -463,6 +574,10 @@ pub const ParameterDescription = struct {
             return value;
         }
     };
+
+    pub fn write(self: *const ParameterDescription, e: *Encoder) WriteError!void {
+        try e.bytes(self.body);
+    }
 
     pub fn format(self: *const ParameterDescription, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("ParameterDescription{{ .count = {d} }}", .{self.count});
@@ -500,6 +615,10 @@ pub const NegotiateProtocolVersion = struct {
         }
     };
 
+    pub fn write(self: *const NegotiateProtocolVersion, e: *Encoder) WriteError!void {
+        try e.bytes(self.body);
+    }
+
     pub fn format(self: *const NegotiateProtocolVersion, writer: *Io.Writer) Io.Writer.Error!void {
         try writer.print("NegotiateProtocolVersion{{ .minor = {d}, .options = {d} }}", .{
             self.minor,
@@ -514,6 +633,10 @@ pub const CopyData = struct {
 
     pub fn decode(body: []const u8) Error!CopyData {
         return .{ .data = body };
+    }
+
+    pub fn write(self: *const CopyData, e: *Encoder) WriteError!void {
+        try e.bytes(self.data);
     }
 
     pub fn format(self: *const CopyData, writer: *Io.Writer) Io.Writer.Error!void {
@@ -542,20 +665,13 @@ fn CopyBody(comptime name: []const u8) type {
 
         /// One format code per column. All of them are text when the overall
         /// format is text.
-        pub fn formats(self: *const Self) Formats {
+        pub fn formats(self: *const Self) wire.U16s {
             return .{ .reader = .init(self.body[1 + 2 ..]), .left = self.columns };
         }
 
-        pub const Formats = struct {
-            reader: wire.Reader,
-            left: u16,
-
-            pub fn next(self: *Formats) Error!?u16 {
-                if (self.left == 0) return null;
-                self.left -= 1;
-                return try self.reader.read(u16);
-            }
-        };
+        pub fn write(self: *const Self, e: *Encoder) WriteError!void {
+            try e.bytes(self.body);
+        }
 
         pub fn format(self: *const Self, writer: *Io.Writer) Io.Writer.Error!void {
             try writer.print("{s}{{ .columns = {d} }}", .{ name, self.columns });
@@ -585,6 +701,10 @@ pub const ErrorResponse = struct {
         return .init(self.body);
     }
 
+    pub fn write(self: *const ErrorResponse, e: *Encoder) WriteError!void {
+        try e.bytes(self.body);
+    }
+
     pub fn format(self: *const ErrorResponse, writer: *Io.Writer) Io.Writer.Error!void {
         try formatFields("ErrorResponse", self.body, writer);
     }
@@ -601,6 +721,10 @@ pub const NoticeResponse = struct {
 
     pub fn fields(self: *const NoticeResponse) error_response.Iterator {
         return .init(self.body);
+    }
+
+    pub fn write(self: *const NoticeResponse, e: *Encoder) WriteError!void {
+        try e.bytes(self.body);
     }
 
     pub fn format(self: *const NoticeResponse, writer: *Io.Writer) Io.Writer.Error!void {
@@ -647,6 +771,15 @@ pub const FunctionCallResponse = struct {
         if (length == -1) return .{ .value = null };
         if (length < 0) return error.UnexpectedEof;
         return .{ .value = try reader.readSlice(@intCast(length)) };
+    }
+
+    pub fn write(self: *const FunctionCallResponse, e: *Encoder) WriteError!void {
+        if (self.value) |value| {
+            try e.int(i32, @intCast(value.len));
+            try e.bytes(value);
+        } else {
+            try e.int(i32, -1);
+        }
     }
 
     pub fn format(self: *const FunctionCallResponse, writer: *Io.Writer) Io.Writer.Error!void {
@@ -783,4 +916,56 @@ test "the cancel key is as long as the frame says" {
     // Protocol 3.2 allows up to 256 bytes, so nothing here assumes four.
     const long = "\x00\x00\x22\xa0" ++ "0123456789abcdef";
     try testing.expectEqual(@as(usize, 16), (try BackendKeyData.decode(long)).key.len);
+}
+
+test "every backend message encodes back to its bytes" {
+    // One sample per tag, in the shape the docs give. Decoding and encoding it
+    // again must return the same message, which is what makes the two
+    // directions two directions of one codec.
+    const samples = [_]struct { tag: u8, body: []const u8 }{
+        .{ .tag = 'R', .body = "\x00\x00\x00\x03" },
+        .{ .tag = 'K', .body = "\x00\x00\x22\xa0\xd9\x0c\xae\xdb" },
+        .{ .tag = '2', .body = "" },
+        .{ .tag = '3', .body = "" },
+        .{ .tag = 'C', .body = "SELECT 1\x00" },
+        .{ .tag = 'W', .body = "\x00\x00\x01\x00\x00" },
+        .{ .tag = 'd', .body = "abc" },
+        .{ .tag = 'c', .body = "" },
+        .{ .tag = 'G', .body = "\x00\x00\x00" },
+        .{ .tag = 'H', .body = "\x01\x00\x01\x00\x01" },
+        .{ .tag = 'D', .body = "\x00\x02\x00\x00\x00\x03one\xff\xff\xff\xff" },
+        .{ .tag = 'I', .body = "" },
+        .{ .tag = 'E', .body = "SERROR\x00C42P01\x00Mno such table\x00\x00" },
+        .{ .tag = 'V', .body = "\x00\x00\x00\x03abc" },
+        .{ .tag = 'v', .body = "\x00\x00\x00\x00\x00\x00\x00\x01opt\x00" },
+        .{ .tag = 'n', .body = "" },
+        .{ .tag = 'N', .body = "SNOTICE\x00\x00" },
+        .{ .tag = 'A', .body = "\x00\x00\x00\x01chan\x00payload\x00" },
+        .{ .tag = 't', .body = "\x00\x02\x00\x00\x00\x17" },
+        .{ .tag = 'S', .body = "server_version\x0018.0\x00" },
+        .{ .tag = '1', .body = "" },
+        .{ .tag = 's', .body = "" },
+        .{ .tag = 'Z', .body = "I" },
+        .{ .tag = 'T', .body = "\x00\x01id\x00" ++
+            "\x00\x00\x00\x00\x00\x00" ++
+            "\x00\x00\x00\x17\x00\x04" ++
+            "\xff\xff\xff\xff\x00\x00" },
+    };
+
+    var buffer: [256]u8 = undefined;
+
+    for (samples) |sample| {
+        const message = try Message.decode(sample.tag, sample.body);
+
+        var e: Encoder = .init;
+        e.reset(&buffer);
+        const bytes = try message.encode(&e);
+
+        try testing.expectEqual(sample.tag, bytes[0]);
+
+        var frame: wire.Reader = .init(bytes);
+        _ = try frame.read(u8);
+        try testing.expectEqual(@as(u32, @intCast(bytes.len - 1)), try frame.read(u32));
+        try testing.expectEqualSlices(u8, sample.body, bytes[5..]);
+    }
 }

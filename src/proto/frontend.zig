@@ -14,10 +14,12 @@ const testing = std.testing;
 const Io = std.Io;
 
 const messages = @import("messages.zig");
+const wire = @import("wire.zig");
 const print = @import("print.zig");
 const write = @import("write.zig");
 const Encoder = write.Encoder;
 const Error = write.Error;
+const DecodeError = wire.Error;
 
 /// The codepoints a parameter or result column can be in.
 pub const Format = enum(u16) {
@@ -50,6 +52,11 @@ fn writeFormats(e: *Encoder, formats: []const Format) Error!void {
 /// `Q`. One or more statements, separated by semicolons, in one round trip.
 pub const Query = struct {
     sql: []const u8,
+
+    pub fn decode(body: []const u8) DecodeError!Query {
+        var reader: wire.Reader = .init(body);
+        return .{ .sql = try wire.takeString(&reader) };
+    }
 
     pub fn write(self: *const Query, e: *Encoder) Error!void {
         try e.string(self.sql);
@@ -133,6 +140,14 @@ pub const Close = struct {
     target: Target,
     name: []const u8 = "",
 
+    pub fn decode(body: []const u8) DecodeError!Close {
+        var reader: wire.Reader = .init(body);
+        return .{
+            .target = @fromBackingInt(try reader.read(u8)),
+            .name = try wire.takeString(&reader),
+        };
+    }
+
     pub fn write(self: *const Close, e: *Encoder) Error!void {
         try e.int(u8, @backingInt(self.target));
         try e.string(self.name);
@@ -150,6 +165,14 @@ pub const Close = struct {
 pub const Describe = struct {
     target: Target,
     name: []const u8 = "",
+
+    pub fn decode(body: []const u8) DecodeError!Describe {
+        var reader: wire.Reader = .init(body);
+        return .{
+            .target = @fromBackingInt(try reader.read(u8)),
+            .name = try wire.takeString(&reader),
+        };
+    }
 
     pub fn write(self: *const Describe, e: *Encoder) Error!void {
         try e.int(u8, @backingInt(self.target));
@@ -169,6 +192,14 @@ pub const Execute = struct {
     portal: []const u8 = "",
     /// Zero means no limit.
     max_rows: u32 = 0,
+
+    pub fn decode(body: []const u8) DecodeError!Execute {
+        var reader: wire.Reader = .init(body);
+        return .{
+            .portal = try wire.takeString(&reader),
+            .max_rows = try reader.read(u32),
+        };
+    }
 
     pub fn write(self: *const Execute, e: *Encoder) Error!void {
         try e.string(self.portal);
@@ -210,6 +241,11 @@ pub const FunctionCall = struct {
 
 /// `H`. Ask the server to send what it has without ending the cycle.
 pub const Flush = struct {
+    pub fn decode(body: []const u8) DecodeError!Flush {
+        if (body.len != 0) return DecodeError.UnexpectedEof;
+        return .{};
+    }
+
     pub fn write(_: Flush, e: *Encoder) Error!void {
         _ = e;
     }
@@ -221,6 +257,11 @@ pub const Flush = struct {
 
 /// `S`. End an extended-protocol cycle; the server answers ReadyForQuery.
 pub const Sync = struct {
+    pub fn decode(body: []const u8) DecodeError!Sync {
+        if (body.len != 0) return DecodeError.UnexpectedEof;
+        return .{};
+    }
+
     pub fn write(_: Sync, e: *Encoder) Error!void {
         _ = e;
     }
@@ -232,6 +273,11 @@ pub const Sync = struct {
 
 /// `X`. End the session. The server sends nothing back.
 pub const Terminate = struct {
+    pub fn decode(body: []const u8) DecodeError!Terminate {
+        if (body.len != 0) return DecodeError.UnexpectedEof;
+        return .{};
+    }
+
     pub fn write(_: Terminate, e: *Encoder) Error!void {
         _ = e;
     }
@@ -246,6 +292,11 @@ pub const Terminate = struct {
 pub const Password = struct {
     password: []const u8,
 
+    pub fn decode(body: []const u8) DecodeError!Password {
+        var reader: wire.Reader = .init(body);
+        return .{ .password = try wire.takeString(&reader) };
+    }
+
     pub fn write(self: *const Password, e: *Encoder) Error!void {
         try e.string(self.password);
     }
@@ -259,6 +310,10 @@ pub const Password = struct {
 pub const CopyData = struct {
     data: []const u8,
 
+    pub fn decode(body: []const u8) DecodeError!CopyData {
+        return .{ .data = body };
+    }
+
     pub fn write(self: *const CopyData, e: *Encoder) Error!void {
         try e.bytes(self.data);
     }
@@ -270,6 +325,11 @@ pub const CopyData = struct {
 
 /// `c`. The end of a copy-in stream.
 pub const CopyDone = struct {
+    pub fn decode(body: []const u8) DecodeError!CopyDone {
+        if (body.len != 0) return DecodeError.UnexpectedEof;
+        return .{};
+    }
+
     pub fn write(_: CopyDone, e: *Encoder) Error!void {
         _ = e;
     }
@@ -282,6 +342,11 @@ pub const CopyDone = struct {
 /// `f`. Give up on a copy-in stream, with a reason the server reports.
 pub const CopyFail = struct {
     reason: []const u8,
+
+    pub fn decode(body: []const u8) DecodeError!CopyFail {
+        var reader: wire.Reader = .init(body);
+        return .{ .reason = try wire.takeString(&reader) };
+    }
 
     pub fn write(self: *const CopyFail, e: *Encoder) Error!void {
         try e.string(self.reason);
@@ -323,6 +388,236 @@ pub const Message = union(messages.Frontend) {
     }
 
     pub fn format(self: *const Message, writer: *Io.Writer) Io.Writer.Error!void {
+        try switch (self.*) {
+            inline else => |body| body.format(writer),
+        };
+    }
+};
+
+/// A decoded `Parse`. The type list is an iterator: a decoder cannot know how
+/// many parameters fit a fixed buffer, and this layer does not allocate.
+pub const ParseView = struct {
+    body: []const u8,
+    statement: []const u8,
+    sql: []const u8,
+    /// Positioned at the first type OID.
+    at: wire.Reader,
+    count: u16,
+
+    pub fn decode(body: []const u8) DecodeError!ParseView {
+        var reader: wire.Reader = .init(body);
+        const statement = try wire.takeString(&reader);
+        const sql = try wire.takeString(&reader);
+        const count = try reader.read(u16);
+        return .{ .body = body, .statement = statement, .sql = sql, .at = reader, .count = count };
+    }
+
+    pub fn types(self: *const ParseView) wire.U32s {
+        return .{ .reader = self.at, .left = self.count };
+    }
+
+    pub fn write(self: *const ParseView, e: *Encoder) Error!void {
+        try e.bytes(self.body);
+    }
+
+    pub fn format(self: *const ParseView, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("Parse{{ .statement = {f}, .sql = {f}, .types = {d} }}", .{
+            print.quoted(self.statement),
+            print.quoted(self.sql),
+            self.count,
+        });
+    }
+};
+
+/// A decoded `Bind`. Formats come in the same three shapes the encoder takes,
+/// so a caller reads the count and then decides.
+pub const BindView = struct {
+    body: []const u8,
+    portal: []const u8,
+    statement: []const u8,
+    /// Positioned at the first parameter format code.
+    formats_at: wire.Reader,
+    format_count: u16,
+    /// Positioned at the first parameter value.
+    values_at: wire.Reader,
+    value_count: u16,
+    /// Positioned at the first result format code.
+    results_at: wire.Reader,
+    result_count: u16,
+
+    pub fn decode(body: []const u8) DecodeError!BindView {
+        var reader: wire.Reader = .init(body);
+        const portal = try wire.takeString(&reader);
+        const statement = try wire.takeString(&reader);
+
+        const format_count = try reader.read(u16);
+        const formats_at = reader;
+        try reader.skip(@as(usize, format_count) * 2);
+
+        const value_count = try reader.read(u16);
+        const values_at = reader;
+
+        // Walking the values is the only way to find where the result formats
+        // start, since each value carries its own length.
+        var left = value_count;
+        while (left != 0) : (left -= 1) {
+            const length = try reader.read(i32);
+            if (length == -1) continue;
+            if (length < 0) return DecodeError.UnexpectedEof;
+            try reader.skip(@intCast(length));
+        }
+
+        const result_count = try reader.read(u16);
+        return .{
+            .body = body,
+            .portal = portal,
+            .statement = statement,
+            .formats_at = formats_at,
+            .format_count = format_count,
+            .values_at = values_at,
+            .value_count = value_count,
+            .results_at = reader,
+            .result_count = result_count,
+        };
+    }
+
+    pub fn formats(self: *const BindView) wire.U16s {
+        return .{ .reader = self.formats_at, .left = self.format_count };
+    }
+
+    pub fn values(self: *const BindView) wire.Values {
+        return .{ .reader = self.values_at, .left = self.value_count };
+    }
+
+    pub fn resultFormats(self: *const BindView) wire.U16s {
+        return .{ .reader = self.results_at, .left = self.result_count };
+    }
+
+    pub fn write(self: *const BindView, e: *Encoder) Error!void {
+        try e.bytes(self.body);
+    }
+
+    pub fn format(self: *const BindView, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print(
+            "Bind{{ .portal = {f}, .statement = {f}, " ++
+                ".formats = {d}, .parameters = {d}, .result_formats = {d} }}",
+            .{
+                print.quoted(self.portal),
+                print.quoted(self.statement),
+                self.format_count,
+                self.value_count,
+                self.result_count,
+            },
+        );
+    }
+};
+
+/// A decoded `FunctionCall`, the same shape as a decoded `Bind`.
+pub const FunctionCallView = struct {
+    body: []const u8,
+    function: u32,
+    /// Positioned at the first argument format code.
+    formats_at: wire.Reader,
+    format_count: u16,
+    /// Positioned at the first argument value.
+    values_at: wire.Reader,
+    value_count: u16,
+    result_format: u16,
+
+    pub fn decode(body: []const u8) DecodeError!FunctionCallView {
+        var reader: wire.Reader = .init(body);
+
+        const function = try reader.read(u32);
+        const format_count = try reader.read(u16);
+        const formats_at = reader;
+        try reader.skip(@as(usize, format_count) * 2);
+
+        const value_count = try reader.read(u16);
+        const values_at = reader;
+
+        var left = value_count;
+        while (left != 0) : (left -= 1) {
+            const length = try reader.read(i32);
+            if (length == -1) continue;
+            if (length < 0) return DecodeError.UnexpectedEof;
+            try reader.skip(@intCast(length));
+        }
+
+        return .{
+            .body = body,
+            .function = function,
+            .formats_at = formats_at,
+            .format_count = format_count,
+            .values_at = values_at,
+            .value_count = value_count,
+            .result_format = try reader.read(u16),
+        };
+    }
+
+    pub fn formats(self: *const FunctionCallView) wire.U16s {
+        return .{ .reader = self.formats_at, .left = self.format_count };
+    }
+
+    pub fn values(self: *const FunctionCallView) wire.Values {
+        return .{ .reader = self.values_at, .left = self.value_count };
+    }
+
+    pub fn write(self: *const FunctionCallView, e: *Encoder) Error!void {
+        try e.bytes(self.body);
+    }
+
+    pub fn format(self: *const FunctionCallView, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("FunctionCall{{ .function = {d}, .arguments = {d} }}", .{
+            self.function,
+            self.value_count,
+        });
+    }
+};
+
+/// A decoded frontend message: the shape a server or a proxy reads.
+///
+/// Three of these are views, because their lists have no fixed size. The rest
+/// are the same values a client writes, since every field they carry is a
+/// borrowed slice or a number.
+pub const Decoded = union(messages.Frontend) {
+    bind: BindView,
+    close: Close,
+    describe: Describe,
+    execute: Execute,
+    function_call: FunctionCallView,
+    flush: Flush,
+    parse: ParseView,
+    query: Query,
+    sync: Sync,
+    terminate: Terminate,
+    copy_data: CopyData,
+    copy_done: CopyDone,
+    copy_fail: CopyFail,
+    password: Password,
+
+    pub fn decode(tag: u8, body: []const u8) error{ UnexpectedEof, UnknownTag }!Decoded {
+        const info = @typeInfo(Decoded).@"union";
+        inline for (info.field_names, info.field_types) |name, Arm| {
+            if (@backingInt(@field(messages.Frontend, name)) == tag) {
+                return @unionInit(Decoded, name, try Arm.decode(body));
+            }
+        } else {
+            @branchHint(.unlikely);
+            return error.UnknownTag;
+        }
+    }
+
+    pub fn encode(self: *const Decoded, e: *Encoder) Error![]const u8 {
+        return switch (self.*) {
+            inline else => |body, tag| blk: {
+                try e.start(tag);
+                try body.write(e);
+                break :blk e.finish();
+            },
+        };
+    }
+
+    pub fn format(self: *const Decoded, writer: *Io.Writer) Io.Writer.Error!void {
         try switch (self.*) {
             inline else => |body| body.format(writer),
         };
@@ -504,4 +799,57 @@ test "a format applies to every parameter or to each one" {
             "\x00\x00",
         try encoded(.{ .bind = .{ .formats = &.{ .text, .binary } } }, &buffer),
     );
+}
+
+test "every frontend message decodes back to its bytes" {
+    // The writer and the reader are one codec: what one produces, the other
+    // reads, and reading it again reproduces the same frame.
+    const info = @typeInfo(Message).@"union";
+
+    inline for (info.field_names, info.field_types) |name, T| {
+        var written: [256]u8 = undefined;
+        var to: Encoder = .init;
+        to.reset(&written);
+        const message: Message = @unionInit(Message, name, sample(T));
+        const bytes = try message.encode(&to);
+
+        const decoded = try Decoded.decode(bytes[0], bytes[5..]);
+
+        var read: [256]u8 = undefined;
+        var again: Encoder = .init;
+        again.reset(&read);
+        try testing.expectEqualSlices(u8, bytes, try decoded.encode(&again));
+    }
+}
+
+test "a decoded bind yields its parameters" {
+    var buffer: [128]u8 = undefined;
+    var e: Encoder = .init;
+    e.reset(&buffer);
+
+    const message: Message = .{
+        .bind = .{
+            .portal = "p",
+            .statement = "s",
+            .formats = &.{.binary},
+            .parameters = &.{ "one", null },
+        },
+    };
+    const bytes = try message.encode(&e);
+
+    const decoded = try Decoded.decode('B', bytes[5..]);
+    try testing.expectEqualStrings("p", decoded.bind.portal);
+    try testing.expectEqualStrings("s", decoded.bind.statement);
+
+    var formats = decoded.bind.formats();
+    try testing.expectEqual(@as(?u16, 1), try formats.next());
+    try testing.expectEqual(@as(?u16, null), try formats.next());
+
+    var values = decoded.bind.values();
+    try testing.expectEqualStrings("one", (try values.next()).?.bytes.?);
+    try testing.expectEqual(@as(?[]const u8, null), (try values.next()).?.bytes);
+    try testing.expectEqual(@as(?wire.Values.Value, null), try values.next());
+
+    var results = decoded.bind.resultFormats();
+    try testing.expectEqual(@as(?u16, null), try results.next());
 }
