@@ -76,6 +76,17 @@ pub const Encoder = struct {
         return self.writer.buffer[at..end];
     }
 
+    /// Where the buffer ends now, for a payload that has no length field of
+    /// its own and is written whole by its caller.
+    pub fn mark(self: *const Encoder) u32 {
+        return @intCast(self.writer.end);
+    }
+
+    /// The bytes written since `mark`.
+    pub fn since(self: *const Encoder, at: u32) []const u8 {
+        return self.writer.buffer[at..self.writer.end];
+    }
+
     /// Raw bytes, for a body field that is already in wire form.
     pub fn bytes(self: *Encoder, value: []const u8) Error!void {
         try self.writer.appendSlice(value);
