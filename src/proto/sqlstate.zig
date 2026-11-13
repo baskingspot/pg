@@ -26,7 +26,9 @@ const std = @import("std");
 const testing = std.testing;
 const Io = std.Io;
 
+const readInt = @import("mem.zig").readInt;
 const wire = @import("wire.zig");
+const writeInt = @import("mem.zig").writeInt;
 
 /// A code as a value: the five ASCII bytes packed big-endian into forty bits.
 ///
@@ -41,11 +43,9 @@ pub const Wire = [len]u8;
 
 /// Pack a code's bytes into its value. The first byte is the high byte, which
 /// is also the order the reader hands them over in.
-pub fn pack(code: *const Wire) u40 {
-    @setEvalBranchQuota(4_000);
-    var value: u40 = 0;
-    for (code) |byte| value = (value << 8) | byte;
-    return value;
+/// ziglint-ignore: Z012
+pub fn pack(code: *const Wire) Code {
+    return readInt(u40, code);
 }
 
 /// The length of a SQLSTATE code, in bytes.
@@ -408,14 +408,8 @@ pub const SqlState = enum(Code) {
 
     /// The bytes this code occupies on the wire.
     pub fn code(self: SqlState) Wire {
-        var value: Code = @backingInt(self);
         var bytes: Wire = undefined;
-        var i: usize = len;
-        while (i > 0) {
-            i -= 1;
-            bytes[i] = @truncate(value);
-            value >>= 8;
-        }
+        writeInt(u40, &bytes, @backingInt(self));
         return bytes;
     }
 
