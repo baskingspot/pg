@@ -26,9 +26,22 @@ const std = @import("std");
 const testing = std.testing;
 const Io = std.Io;
 
-/// Pack a five-byte code into the tag. The first byte is the high byte, so the
-/// order of the code on the wire is the order of the bytes.
-pub fn pack(code: *const [len]u8) u40 {
+const wire = @import("wire.zig");
+
+/// A code as a value: the five ASCII bytes packed big-endian into forty bits.
+///
+/// The number is the code, so a packed code compares, switches, and tags the
+/// enum without a table. The bytes are how it travels, and that belongs to the
+/// reader and the writer: `stdx.wire.Reader` reads a `SqlState` straight off
+/// five bytes because the tag type is an integer.
+pub const Code = u40;
+
+/// The bytes a code occupies on the wire.
+pub const Wire = [len]u8;
+
+/// Pack a code's bytes into its value. The first byte is the high byte, which
+/// is also the order the reader hands them over in.
+pub fn pack(code: *const Wire) u40 {
     @setEvalBranchQuota(4_000);
     var value: u40 = 0;
     for (code) |byte| value = (value << 8) | byte;
@@ -38,7 +51,7 @@ pub fn pack(code: *const [len]u8) u40 {
 /// The length of a SQLSTATE code, in bytes.
 pub const len = 5;
 
-pub const SqlState = enum(u40) {
+pub const SqlState = enum(Code) {
     /// A code as it appears on the wire, which is also its position in this
     /// list.
     // Class 00 — Successful Completion
@@ -393,10 +406,10 @@ pub const SqlState = enum(u40) {
     /// broken invariant.
     _,
 
-    /// The five bytes on the wire.
-    pub fn code(self: SqlState) [len]u8 {
-        var value: u40 = @backingInt(self);
-        var bytes: [len]u8 = undefined;
+    /// The bytes this code occupies on the wire.
+    pub fn code(self: SqlState) Wire {
+        var value: Code = @backingInt(self);
+        var bytes: Wire = undefined;
         var i: usize = len;
         while (i > 0) {
             i -= 1;
@@ -407,7 +420,7 @@ pub const SqlState = enum(u40) {
     }
 
     /// A code from the bytes a message carried, named or not.
-    pub fn fromBytes(bytes: *const [len]u8) SqlState {
+    pub fn fromBytes(bytes: *const Wire) SqlState {
         return @fromBackingInt(pack(bytes));
     }
 
@@ -436,6 +449,14 @@ test "a code this table does not name keeps its bytes" {
     const unknown = SqlState.fromBytes("ZZ999");
     try testing.expectEqualStrings("ZZ999", &unknown.code());
     try testing.expectFmt("ZZ999", "{f}", .{unknown});
+}
+
+test "the reader reads a state off five bytes" {
+    // The value is the code, so the wire form is the reader's business and
+    // there is nothing to convert first.
+    var reader: wire.Reader = .init("23505");
+    try testing.expectEqual(SqlState.unique_violation, try reader.read(SqlState));
+    try testing.expectEqual(@as(usize, 0), reader.remaining().len);
 }
 
 test "the named codes print as themselves" {
