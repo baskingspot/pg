@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const testing = std.testing;
+const Io = std.Io;
 
 const readInt = @import("mem.zig").readInt;
 const writeInt = @import("mem.zig").writeInt;
@@ -58,6 +59,11 @@ pub const Version = struct {
         return readInt(u16, self.wire[2..4]);
     }
 
+    /// `3.0`, for a log line.
+    pub fn format(self: Version, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("{d}.{d}", .{ self.major(), self.minor() });
+    }
+
     pub inline fn eql(a: Version, b: Version) bool {
         const a_int: u32 = @bitCast(a.wire);
         const b_int: u32 = @bitCast(b.wire);
@@ -89,6 +95,12 @@ test "init and the word agree" {
     try testing.expectEqual(@as(u32, 0x0003_0001), built.toU32());
     try testing.expectEqual(@as(u16, 3), built.major());
     try testing.expectEqual(@as(u16, 1), built.minor());
+}
+
+test "a version prints as the two numbers" {
+    try testing.expectFmt("3.0", "{f}", .{Version.v3_0});
+    try testing.expectFmt("3.2", "{f}", .{Version.v3_2});
+    try testing.expectFmt("4.1", "{f}", .{Version.init(4, 1)});
 }
 
 test "another major version is representable" {

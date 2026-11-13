@@ -7,7 +7,9 @@
 
 const std = @import("std");
 const testing = std.testing;
+const Io = std.Io;
 
+const print = @import("print.zig");
 const write = @import("write.zig");
 const Encoder = write.Encoder;
 const Error = write.Error;
@@ -27,6 +29,9 @@ pub const Query = struct {
         try e.string(self.sql);
         return e.finish();
     }
+    pub fn format(self: Query, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("Query{{ .sql = {f} }}", .{print.quoted(self.sql)});
+    }
 };
 
 /// `P`. Create or replace a prepared statement.
@@ -44,6 +49,17 @@ pub const Parse = struct {
         try e.int(u16, @intCast(self.types.len));
         for (self.types) |oid| try e.int(u32, oid);
         return e.finish();
+    }
+    pub fn format(self: Parse, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("Parse{{ .statement = {f}, .sql = {f}, .types = {{", .{
+            print.quoted(self.statement),
+            print.quoted(self.sql),
+        });
+        for (self.types, 0..) |oid, i| {
+            if (i != 0) try writer.writeAll(", ");
+            try writer.print("{d}", .{oid});
+        }
+        try writer.writeAll("} }");
     }
 };
 
@@ -65,7 +81,7 @@ pub const Bind = struct {
         try e.string(self.statement);
 
         try e.int(u16, @intCast(self.formats.len));
-        for (self.formats) |format| try e.int(u16, @backingInt(format));
+        for (self.formats) |code| try e.int(u16, @backingInt(code));
 
         try e.int(u16, @intCast(self.parameters.len));
         for (self.parameters) |parameter| {
@@ -78,9 +94,22 @@ pub const Bind = struct {
         }
 
         try e.int(u16, @intCast(self.result_formats.len));
-        for (self.result_formats) |format| try e.int(u16, @backingInt(format));
+        for (self.result_formats) |code| try e.int(u16, @backingInt(code));
 
         return e.finish();
+    }
+    pub fn format(self: Bind, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print(
+            "Bind{{ .portal = {f}, .statement = {f}, " ++
+                ".formats = {d}, .parameters = {d}, .result_formats = {d} }}",
+            .{
+                print.quoted(self.portal),
+                print.quoted(self.statement),
+                self.formats.len,
+                self.parameters.len,
+                self.result_formats.len,
+            },
+        );
     }
 };
 
@@ -101,6 +130,12 @@ pub const Close = struct {
         try e.string(self.name);
         return e.finish();
     }
+    pub fn format(self: Close, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("Close{{ .target = .{t}, .name = {f} }}", .{
+            self.target,
+            print.quoted(self.name),
+        });
+    }
 };
 
 /// `D`. Ask for a statement's or a portal's description.
@@ -113,6 +148,12 @@ pub const Describe = struct {
         try e.int(u8, @backingInt(self.target));
         try e.string(self.name);
         return e.finish();
+    }
+    pub fn format(self: Describe, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("Describe{{ .target = .{t}, .name = {f} }}", .{
+            self.target,
+            print.quoted(self.name),
+        });
     }
 };
 
@@ -128,6 +169,12 @@ pub const Execute = struct {
         try e.int(u32, self.max_rows);
         return e.finish();
     }
+    pub fn format(self: Execute, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("Execute{{ .portal = {f}, .max_rows = {d} }}", .{
+            print.quoted(self.portal),
+            self.max_rows,
+        });
+    }
 };
 
 /// `S`. End an extended-protocol cycle; the server answers ReadyForQuery.
@@ -135,6 +182,10 @@ pub const Sync = struct {
     pub fn encode(_: Sync, e: *Encoder) Error![]const u8 {
         try e.start(.sync);
         return e.finish();
+    }
+    pub fn format(self: Sync, writer: *Io.Writer) Io.Writer.Error!void {
+        _ = self;
+        try writer.writeAll("Sync");
     }
 };
 
@@ -144,6 +195,10 @@ pub const Flush = struct {
         try e.start(.flush);
         return e.finish();
     }
+    pub fn format(self: Flush, writer: *Io.Writer) Io.Writer.Error!void {
+        _ = self;
+        try writer.writeAll("Flush");
+    }
 };
 
 /// `X`. End the session. The server sends nothing back.
@@ -151,6 +206,10 @@ pub const Terminate = struct {
     pub fn encode(_: Terminate, e: *Encoder) Error![]const u8 {
         try e.start(.terminate);
         return e.finish();
+    }
+    pub fn format(self: Terminate, writer: *Io.Writer) Io.Writer.Error!void {
+        _ = self;
+        try writer.writeAll("Terminate");
     }
 };
 
@@ -164,6 +223,9 @@ pub const Password = struct {
         try e.string(self.password);
         return e.finish();
     }
+    pub fn format(self: Password, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("Password{{ {f} }}", .{print.blob(self.password)});
+    }
 };
 
 /// `d`. A chunk of a copy-in stream.
@@ -175,6 +237,9 @@ pub const CopyData = struct {
         try e.bytes(self.data);
         return e.finish();
     }
+    pub fn format(self: CopyData, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("CopyData{{ {f} }}", .{print.blob(self.data)});
+    }
 };
 
 /// `c`. The end of a copy-in stream.
@@ -182,6 +247,10 @@ pub const CopyDone = struct {
     pub fn encode(_: CopyDone, e: *Encoder) Error![]const u8 {
         try e.start(.copy_done);
         return e.finish();
+    }
+    pub fn format(self: CopyDone, writer: *Io.Writer) Io.Writer.Error!void {
+        _ = self;
+        try writer.writeAll("CopyDone");
     }
 };
 
@@ -193,6 +262,9 @@ pub const CopyFail = struct {
         try e.start(.copy_fail);
         try e.string(self.reason);
         return e.finish();
+    }
+    pub fn format(self: CopyFail, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("CopyFail{{ .reason = {f} }}", .{print.quoted(self.reason)});
     }
 };
 
@@ -219,6 +291,12 @@ pub const Message = union(enum) {
         return switch (self) {
             inline else => |body| body.encode(e),
         };
+    }
+
+    pub fn format(self: Message, writer: *Io.Writer) Io.Writer.Error!void {
+        switch (self) {
+            inline else => |body| try body.format(writer),
+        }
     }
 };
 
@@ -264,6 +342,46 @@ test "the fixed messages are what their encoders produce" {
     );
     try testing.expectEqualSlices(u8, &.{ 'D', 0, 0, 0, 6, 'P', 0 }, &fixed.describe_portal);
     try testing.expectEqualSlices(u8, &.{ 'E', 0, 0, 0, 9, 0, 0, 0, 0, 0 }, &fixed.execute_portal);
+}
+
+test "a message prints as itself" {
+    try testing.expectFmt("Query{ .sql = \"select 1\" }", "{f}", .{
+        Query{ .sql = "select 1" },
+    });
+    try testing.expectFmt("Parse{ .statement = \"\", .sql = \"select $1\", .types = {} }", "{f}", .{
+        Parse{ .sql = "select $1" },
+    });
+    try testing.expectFmt("Parse{ .statement = \"s\", .sql = \"q\", .types = {23, 25} }", "{f}", .{
+        Parse{ .statement = "s", .sql = "q", .types = &.{ 23, 25 } },
+    });
+    try testing.expectFmt(
+        "Bind{ .portal = \"\", .statement = \"\", " ++
+            ".formats = 0, .parameters = 0, .result_formats = 0 }",
+        "{f}",
+        .{Bind{}},
+    );
+    try testing.expectFmt("Close{ .target = .statement, .name = \"s\" }", "{f}", .{
+        Close{ .target = .statement, .name = "s" },
+    });
+    try testing.expectFmt("Execute{ .portal = \"p\", .max_rows = 10 }", "{f}", .{
+        Execute{ .portal = "p", .max_rows = 10 },
+    });
+    try testing.expectFmt("Sync", "{f}", .{Sync{}});
+    try testing.expectFmt("Terminate", "{f}", .{Terminate{}});
+}
+
+test "a password and a copy stream print as a size" {
+    // A log line is forever, and so is a credential in one.
+    try testing.expectFmt("Password{ <7 bytes> }", "{f}", .{Password{ .password = "hunter2" }});
+    try testing.expectFmt("CopyData{ <3 bytes> }", "{f}", .{CopyData{ .data = "abc" }});
+}
+
+test "the union prints as the arm it holds" {
+    const message: Message = .{ .sync = .{} };
+    try testing.expectFmt("Sync", "{f}", .{message});
+
+    const query: Message = .{ .query = .{ .sql = "select 1" } };
+    try testing.expectFmt("Query{ .sql = \"select 1\" }", "{f}", .{query});
 }
 
 test "the union names the arm, and the bytes follow" {
