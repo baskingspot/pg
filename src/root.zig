@@ -29,6 +29,7 @@
 const std = @import("std");
 const testing = std.testing;
 
+pub const backend = @import("proto/backend.zig");
 pub const error_response = @import("proto/error_response.zig");
 pub const frame = @import("proto/frame.zig");
 pub const frontend = @import("proto/frontend.zig");
