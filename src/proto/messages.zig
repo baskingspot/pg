@@ -30,20 +30,17 @@ const readInt = @import("mem.zig").readInt;
 /// table a capture of a comptime local, and the lookup cost 3984 ns per 1024
 /// bytes instead of 312. As a namespace const the table is one array.
 fn TableOf(comptime E: type) type {
-    const tag_type = @typeInfo(E).@"enum".tag_type;
-    if (tag_type != u8) @compileError(@typeName(E) ++ ": a message tag is one byte");
-
     return struct {
         /// The entry for a byte that names no message. No message uses the
         /// highest byte, so the table is 256 bytes of tag rather than 512
         /// bytes of tag and a null flag.
-        const unknown = std.math.maxInt(tag_type);
+        const unknown = std.math.maxInt(u8);
 
-        const table: [256]tag_type = blk: {
+        const table: [256]u8 = blk: {
             @setEvalBranchQuota(2_000);
-            var built: [256]tag_type = @splat(unknown);
+            var built: [256]u8 = @splat(unknown);
             for (enums.values(E)) |value| {
-                const tag: tag_type = @backingInt(value);
+                const tag: u8 = @backingInt(value);
                 if (tag == unknown) @compileError(@typeName(E) ++ " uses the sentinel byte");
                 built[tag] = tag;
             }
