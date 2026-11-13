@@ -25,13 +25,16 @@ pub const Error = error{NoSpaceLeft};
 /// backfill in `finish` safe.
 pub const Encoder = struct {
     writer: wire.Writer,
-    /// Where the current message's tag byte went.
+    /// Where the current message began.
     at: u32,
+    /// How many bytes sit before the length field: one for a tag, none in the
+    /// startup phase.
+    header: u1,
 
-    pub const init: Encoder = .{ .writer = .empty, .at = 0 };
+    pub const init: Encoder = .{ .writer = .empty, .at = 0, .header = 1 };
 
     pub fn reset(self: *Encoder, buffer: []u8) void {
-        self.* = .{ .writer = .init(buffer), .at = 0 };
+        self.* = .{ .writer = .init(buffer), .at = 0, .header = 1 };
     }
 
     /// Start a frontend message: the tag, then four bytes of length to fill
@@ -46,8 +49,17 @@ pub const Encoder = struct {
         try self.begin(@backingInt(tag));
     }
 
+    /// Start a message from before the tagged phase, where a length comes
+    /// first and there is no tag byte.
+    pub fn startUntagged(self: *Encoder) Error!void {
+        self.at = @intCast(self.writer.end);
+        self.header = 0;
+        _ = try self.writer.reserve(4);
+    }
+
     fn begin(self: *Encoder, tag: u8) Error!void {
         self.at = @intCast(self.writer.end);
+        self.header = 1;
         try self.writer.append(u8, tag);
         _ = try self.writer.reserve(4);
     }
@@ -59,7 +71,8 @@ pub const Encoder = struct {
     pub fn finish(self: *Encoder) []const u8 {
         const end = self.writer.end;
         const at = self.at;
-        writeInt(u32, self.writer.buffer[at + 1 ..][0..4], @intCast(end - at - 1));
+        const length: u32 = @intCast(end - at - self.header);
+        writeInt(u32, self.writer.buffer[at + self.header ..][0..4], length);
         return self.writer.buffer[at..end];
     }
 

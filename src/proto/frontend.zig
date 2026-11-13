@@ -287,22 +287,116 @@ pub const Terminate = struct {
     }
 };
 
-/// `p`. A password, or an answer in the SASL conversation: the tag is the
-/// same and the authentication state decides which this is.
-pub const Password = struct {
-    password: []const u8,
+/// A `SASLInitialResponse`: the mechanism the client chose and its first
+/// message.
+pub const SaslInitial = struct {
+    mechanism: []const u8,
+    /// Null when the client sent no initial response, which the wire marks
+    /// with a length of -1 rather than a zero length.
+    response: ?[]const u8,
 
-    pub fn decode(body: []const u8) DecodeError!Password {
+    pub fn decode(body: []const u8) DecodeError!SaslInitial {
         var reader: wire.Reader = .init(body);
-        return .{ .password = try wire.takeString(&reader) };
+        const mechanism = try wire.takeString(&reader);
+
+        const length = try reader.read(i32);
+        if (length == -1) return .{ .mechanism = mechanism, .response = null };
+        if (length < 0) return DecodeError.UnexpectedEof;
+
+        return .{
+            .mechanism = mechanism,
+            .response = try reader.readSlice(@intCast(length)),
+        };
     }
 
+    pub fn write(self: *const SaslInitial, e: *Encoder) Error!void {
+        try e.string(self.mechanism);
+        if (self.response) |response| {
+            try e.int(i32, @intCast(response.len));
+            try e.bytes(response);
+        } else {
+            try e.int(i32, -1);
+        }
+    }
+
+    pub fn format(self: *const SaslInitial, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("SaslInitial{{ .mechanism = {f}, .response = {d} }}", .{
+            print.quoted(self.mechanism),
+            if (self.response) |response| response.len else 0,
+        });
+    }
+};
+
+/// `p`. The one tag four messages share. Which one this is comes from the
+/// authentication conversation, not from the byte, so a writer names it.
+pub const Password = union(enum) {
+    /// `PasswordMessage`: the password, null-terminated.
+    cleartext: []const u8,
+    /// `SASLInitialResponse`.
+    sasl_initial: SaslInitial,
+    /// `SASLResponse`: mechanism data, with no length and no terminator.
+    sasl_response: []const u8,
+    /// `GSSResponse`: the same shape as a SASL response.
+    gss: []const u8,
+
     pub fn write(self: *const Password, e: *Encoder) Error!void {
-        try e.string(self.password);
+        switch (self.*) {
+            .cleartext => |password| try e.string(password),
+            .sasl_initial => |initial| try initial.write(e),
+            .sasl_response => |data| try e.bytes(data),
+            .gss => |data| try e.bytes(data),
+        }
     }
 
     pub fn format(self: *const Password, writer: *Io.Writer) Io.Writer.Error!void {
-        try writer.print("Password{{ {f} }}", .{print.blob(self.password)});
+        switch (self.*) {
+            .cleartext => |password| try writer.print("Password{{ .cleartext = {f} }}", .{
+                print.blob(password),
+            }),
+            .sasl_initial => |initial| try writer.print("Password{{ .sasl_initial = {f} }}", .{
+                initial,
+            }),
+            .sasl_response => |data| try writer.print("Password{{ .sasl_response = {f} }}", .{
+                print.blob(data),
+            }),
+            .gss => |data| try writer.print("Password{{ .gss = {f} }}", .{print.blob(data)}),
+        }
+    }
+};
+
+/// A decoded `p` body, for the server side.
+///
+/// The body is kept as it arrived, because the four messages it could be are
+/// told apart by the conversation rather than by the tag. The accessors are
+/// how a caller who knows asks.
+pub const PasswordBody = struct {
+    body: []const u8,
+
+    pub fn decode(body: []const u8) DecodeError!PasswordBody {
+        return .{ .body = body };
+    }
+
+    /// `PasswordMessage`: a null-terminated password.
+    pub fn cleartext(self: *const PasswordBody) DecodeError![]const u8 {
+        var reader: wire.Reader = .init(self.body);
+        return wire.takeString(&reader);
+    }
+
+    pub fn saslInitial(self: *const PasswordBody) DecodeError!SaslInitial {
+        return SaslInitial.decode(self.body);
+    }
+
+    /// A `SASLResponse` or a `GSSResponse`, which are the bytes as sent.
+    pub fn raw(self: *const PasswordBody) []const u8 {
+        return self.body;
+    }
+
+    pub fn write(self: *const PasswordBody, e: *Encoder) Error!void {
+        try e.bytes(self.body);
+    }
+
+    pub fn format(self: *const PasswordBody, writer: *Io.Writer) Io.Writer.Error!void {
+        try writer.print("Password{{ {f} }}", .{print.blob(self.body)});
     }
 };
 
@@ -593,7 +687,7 @@ pub const Decoded = union(messages.Frontend) {
     copy_data: CopyData,
     copy_done: CopyDone,
     copy_fail: CopyFail,
-    password: Password,
+    password: PasswordBody,
 
     pub fn decode(tag: u8, body: []const u8) error{ UnexpectedEof, UnknownTag }!Decoded {
         const info = @typeInfo(Decoded).@"union";
@@ -675,9 +769,40 @@ test "a message prints as itself" {
     try testing.expectFmt("Terminate", "{f}", .{Terminate{}});
 }
 
+test "the four messages under one tag" {
+    // The tag does not say which of these it is; the conversation does.
+    var buffer: [64]u8 = undefined;
+
+    const sasl_initial: Message = .{
+        .password = .{
+            .sasl_initial = .{ .mechanism = "SCRAM-SHA-256", .response = "n,,n=,r=abc" },
+        },
+    };
+    var e: Encoder = .init;
+    e.reset(&buffer);
+    const bytes = try sasl_initial.encode(&e);
+    try testing.expectEqualSlices(
+        u8,
+        "p\x00\x00\x00\x21SCRAM-SHA-256\x00\x00\x00\x00\x0bn,,n=,r=abc",
+        bytes,
+    );
+
+    const body = try PasswordBody.decode(bytes[5..]);
+    const decoded = try body.saslInitial();
+    try testing.expectEqualStrings("SCRAM-SHA-256", decoded.mechanism);
+    try testing.expectEqualStrings("n,,n=,r=abc", decoded.response.?);
+
+    // A SASL response is raw bytes with no terminator, so reading it as a
+    // string would run off the end.
+    const raw = try PasswordBody.decode("r=abc,s=xyz");
+    try testing.expectError(error.UnexpectedEof, raw.saslInitial());
+}
+
 test "a password and a copy stream print as a size" {
     // A log line is forever, and so is a credential in one.
-    try testing.expectFmt("Password{ <7 bytes> }", "{f}", .{Password{ .password = "hunter2" }});
+    try testing.expectFmt("Password{ .cleartext = <7 bytes> }", "{f}", .{
+        Password{ .cleartext = "hunter2" },
+    });
     try testing.expectFmt("CopyData{ <3 bytes> }", "{f}", .{CopyData{ .data = "abc" }});
 }
 
@@ -693,7 +818,7 @@ test "the union prints as the arm it holds" {
 fn sample(comptime T: type) T {
     if (T == Query) return .{ .sql = "q" };
     if (T == Parse) return .{ .sql = "q" };
-    if (T == Password) return .{ .password = "p" };
+    if (T == Password) return .{ .cleartext = "p" };
     if (T == CopyData) return .{ .data = "d" };
     if (T == CopyFail) return .{ .reason = "r" };
     if (T == FunctionCall) return .{ .function = 1 };
