@@ -24,7 +24,7 @@ pub const Field = struct {
     /// The value bytes, borrowed from the message body.
     value: []const u8,
 
-    pub fn kind(self: Field) ?messages.ErrorField {
+    pub fn kind(self: Field) messages.ErrorField {
         return .fromByte(self.code);
     }
 
@@ -74,15 +74,15 @@ test "the three fields every error has" {
     var it = fields(body);
 
     const severity = (try it.next()).?;
-    try testing.expectEqual(messages.ErrorField.severity, severity.kind().?);
+    try testing.expectEqual(messages.ErrorField.severity, severity.kind());
     try testing.expectEqualStrings("ERROR", severity.value);
 
     const code = (try it.next()).?;
-    try testing.expectEqual(messages.ErrorField.code, code.kind().?);
+    try testing.expectEqual(messages.ErrorField.code, code.kind());
     try testing.expectEqualStrings("42P01", code.value);
 
     const message = (try it.next()).?;
-    try testing.expectEqual(messages.ErrorField.message, message.kind().?);
+    try testing.expectEqual(messages.ErrorField.message, message.kind());
     try testing.expectEqualStrings("relation \"x\" does not exist", message.value);
 
     try testing.expectEqual(@as(?Field, null), try it.next());
@@ -90,13 +90,15 @@ test "the three fields every error has" {
 
 test "a code this library does not name is still a field" {
     // The registry is open past what the docs define, and dropping the field
-    // would be worse than carrying a byte nobody reads.
+    // would be worse than carrying a byte nobody reads. The code survives the
+    // conversion, so a caller's switch reaches its else arm instead of a
+    // different field's.
     const body = "Z" ++ "something new\x00" ++ "\x00";
     var it = fields(body);
 
     const field = (try it.next()).?;
     try testing.expectEqual(@as(u8, 'Z'), field.code);
-    try testing.expectEqual(@as(?messages.ErrorField, null), field.kind());
+    try testing.expectEqual(@as(u8, 'Z'), @backingInt(field.kind()));
     try testing.expectEqualStrings("something new", field.value);
 }
 

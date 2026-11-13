@@ -19,41 +19,6 @@ const enums = std.enums;
 
 const readInt = @import("mem.zig").readInt;
 
-/// A byte-to-message lookup built from the enum itself.
-///
-/// `std.enums.fromInt` is a linear scan over every variant for an exhaustive
-/// enum, and a hand-written switch compiles to an indirect branch the
-/// predictor cannot learn. This is one indexed load either way. Built from
-/// `std.enums.values`, so a new variant cannot be left out.
-///
-/// This returns a type rather than a function: a function value made the
-/// table a capture of a comptime local, and the lookup cost 3984 ns per 1024
-/// bytes instead of 312. As a namespace const the table is one array.
-fn TableOf(comptime E: type) type {
-    return struct {
-        /// The entry for a byte that names no message. No message uses the
-        /// highest byte, so the table is 256 bytes of tag rather than 512
-        /// bytes of tag and a null flag.
-        const unknown = std.math.maxInt(u8);
-
-        const table: [256]u8 = blk: {
-            @setEvalBranchQuota(2_000);
-            var built: [256]u8 = @splat(unknown);
-            for (enums.values(E)) |value| {
-                const tag: u8 = @backingInt(value);
-                if (tag == unknown) @compileError(@typeName(E) ++ " uses the sentinel byte");
-                built[tag] = tag;
-            }
-            break :blk built;
-        };
-
-        pub inline fn get(byte: u8) ?E {
-            const tag = table[byte];
-            return if (tag == unknown) null else @fromBackingInt(tag);
-        }
-    };
-}
-
 /// Frontend to backend messages. A client encodes these; only a server or a
 /// proxy decodes them.
 pub const Frontend = enum(u8) {
@@ -74,8 +39,13 @@ pub const Frontend = enum(u8) {
     /// tag alone does not say which; the authentication conversation does.
     password = 'p',
 
-    pub inline fn fromByte(byte: u8) error{UnknownTag}!Frontend {
-        return TableOf(Frontend).get(byte) orelse error.UnknownTag;
+    /// A tag this library does not name. The wire can carry one: a newer
+    /// server, a proxy, or a byte that is not a tag at all. A switch over the
+    /// enum reaches its `else` arm, and the caller decides what to do.
+    _,
+
+    pub inline fn fromByte(byte: u8) Frontend {
+        return @fromBackingInt(byte);
     }
 
     pub fn toByte(self: Frontend) u8 {
@@ -113,8 +83,13 @@ pub const Backend = enum(u8) {
     ready_for_query = 'Z',
     row_description = 'T',
 
-    pub inline fn fromByte(byte: u8) error{UnknownTag}!Backend {
-        return TableOf(Backend).get(byte) orelse error.UnknownTag;
+    /// A tag this library does not name. The wire can carry one: a newer
+    /// server, a proxy, or a byte that is not a tag at all. A switch over the
+    /// enum reaches its `else` arm, and the caller decides what to do.
+    _,
+
+    pub inline fn fromByte(byte: u8) Backend {
+        return @fromBackingInt(byte);
     }
 
     pub fn toByte(self: Backend) u8 {
@@ -131,8 +106,11 @@ pub const Transaction = enum(u8) {
     /// In a failed transaction block; queries are rejected until it ends.
     failed = 'E',
 
-    pub inline fn fromByte(byte: u8) error{UnknownTag}!Transaction {
-        return TableOf(Transaction).get(byte) orelse error.UnknownTag;
+    /// A status byte this library does not name.
+    _,
+
+    pub inline fn fromByte(byte: u8) Transaction {
+        return @fromBackingInt(byte);
     }
 };
 
@@ -152,16 +130,19 @@ pub const Auth = enum(u32) {
     sasl_continue = 11,
     sasl_final = 12,
 
-    pub fn fromCode(code: u32) error{UnknownAuth}!Auth {
-        return enums.fromInt(Auth, code) orelse error.UnknownAuth;
+    /// An authentication code this library does not name.
+    _,
+
+    pub inline fn fromCode(code: u32) Auth {
+        return @fromBackingInt(code);
     }
 };
 
 /// `ErrorResponse` and `NoticeResponse` field codes.
 ///
 /// The registry is open. The protocol says a frontend silently ignores a field
-/// code it does not know, so `fromByte` returns null instead of an error, and
-/// a decoder skips to the next field.
+/// code it does not know, so an unknown code stays an unknown value: it
+/// compares equal to none of the fields below and falls into the `else` arm.
 ///
 /// A field appears at most once in a message, in any order, and the body ends
 /// with a zero byte.
@@ -193,8 +174,12 @@ pub const ErrorField = enum(u8) {
     line = 'L',
     routine = 'R',
 
-    pub fn fromByte(byte: u8) ?ErrorField {
-        return TableOf(ErrorField).get(byte);
+    /// A field code this library does not name. The protocol says to ignore
+    /// it, and an unknown code compares equal to none of the fields above.
+    _,
+
+    pub inline fn fromByte(byte: u8) ErrorField {
+        return @fromBackingInt(byte);
     }
 };
 
@@ -216,49 +201,65 @@ pub const fixed = struct {
     pub const execute_portal: [10]u8 = .{ 'E', 0, 0, 0, 9, 0, 0, 0, 0, 0 };
 };
 
-test "tags round-trip" {
-    try testing.expectEqual(Frontend.query, try Frontend.fromByte('Q'));
-    try testing.expectEqual(@as(u8, 'p'), Frontend.password.toByte());
-    try testing.expectEqual(Backend.ready_for_query, try Backend.fromByte('Z'));
-    try testing.expectEqual(Backend.negotiate_protocol_version, try Backend.fromByte('v'));
-    try testing.expectEqual(Transaction.failed, try Transaction.fromByte('E'));
+/// Whether `value` is one of the tags `E` declares. A non-exhaustive enum can
+/// hold any tag in its backing type, so this is the check a decoder makes when
+/// it has to tell a message from a byte it does not know.
+fn isDeclared(comptime E: type, value: E) bool {
+    inline for (enums.values(E)) |declared| {
+        if (@backingInt(declared) == @backingInt(value)) return true;
+    }
+    return false;
 }
 
-test "every declared tag survives the table" {
-    // The table is built from the enum, so it cannot miss a variant. This pins
-    // the other direction: that `fromByte` accepts each one it declares.
+test "tags round-trip" {
+    try testing.expectEqual(Frontend.query, Frontend.fromByte('Q'));
+    try testing.expectEqual(@as(u8, 'p'), Frontend.password.toByte());
+    try testing.expectEqual(Backend.ready_for_query, Backend.fromByte('Z'));
+    try testing.expectEqual(Backend.negotiate_protocol_version, Backend.fromByte('v'));
+    try testing.expectEqual(Transaction.failed, Transaction.fromByte('E'));
+}
+
+test "every declared tag survives the conversion" {
     inline for (enums.values(Frontend)) |tag| {
-        try testing.expectEqual(tag, try Frontend.fromByte(@backingInt(tag)));
+        try testing.expectEqual(tag, Frontend.fromByte(@backingInt(tag)));
     }
     inline for (enums.values(Backend)) |tag| {
-        try testing.expectEqual(tag, try Backend.fromByte(@backingInt(tag)));
+        try testing.expectEqual(tag, Backend.fromByte(@backingInt(tag)));
     }
     inline for (enums.values(Transaction)) |state| {
-        try testing.expectEqual(state, try Transaction.fromByte(@backingInt(state)));
+        try testing.expectEqual(state, Transaction.fromByte(@backingInt(state)));
+    }
+    inline for (enums.values(ErrorField)) |field| {
+        try testing.expectEqual(field, ErrorField.fromByte(@backingInt(field)));
     }
 }
 
 test "a tag belongs to one direction" {
     // Query is frontend only, ReadyForQuery is backend only. A decoder that
-    // guesses the direction accepts both and is wrong either way.
-    try testing.expectError(error.UnknownTag, Backend.fromByte('Q'));
-    try testing.expectError(error.UnknownTag, Frontend.fromByte('Z'));
+    // guesses the direction accepts both and is wrong either way. The
+    // conversion cannot refuse, so what it must do is keep the byte and not
+    // pretend to be one of the tags it declares.
+    try testing.expect(!isDeclared(Backend, Backend.fromByte('Q')));
+    try testing.expect(!isDeclared(Frontend, Frontend.fromByte('Z')));
+    try testing.expectEqual(@as(u8, 'Q'), @backingInt(Backend.fromByte('Q')));
 }
 
 test "error field codes are distinct" {
     // P is the submitted query, p is a generated one, q is its text. An
     // off-by-one here relabels a position as an internal position, which is
     // the kind of thing a client cannot tell from the outside.
-    try testing.expectEqual(ErrorField.position, ErrorField.fromByte('P').?);
-    try testing.expectEqual(ErrorField.internal_position, ErrorField.fromByte('p').?);
-    try testing.expectEqual(ErrorField.internal_query, ErrorField.fromByte('q').?);
+    try testing.expectEqual(ErrorField.position, ErrorField.fromByte('P'));
+    try testing.expectEqual(ErrorField.internal_position, ErrorField.fromByte('p'));
+    try testing.expectEqual(ErrorField.internal_query, ErrorField.fromByte('q'));
 }
 
-test "unknown error fields are skipped, not rejected" {
-    // 'X' is not a field code, and the protocol says to ignore it.
-    try testing.expectEqual(@as(?ErrorField, null), ErrorField.fromByte('X'));
+test "an unknown error field keeps its code" {
+    // 'X' is not a field code, and the protocol says to ignore it. Ignoring
+    // it starts with it comparing equal to nothing this library names.
+    try testing.expect(!isDeclared(ErrorField, ErrorField.fromByte('X')));
+    try testing.expectEqual(@as(u8, 'X'), @backingInt(ErrorField.fromByte('X')));
     // Zero terminates the body rather than naming a field.
-    try testing.expectEqual(@as(?ErrorField, null), ErrorField.fromByte(0));
+    try testing.expect(!isDeclared(ErrorField, ErrorField.fromByte(0)));
 }
 
 test "fixed messages declare their own length" {
@@ -284,6 +285,6 @@ test "fixed messages start with their tag" {
         fixed.describe_portal,
         fixed.execute_portal,
     }) |message| {
-        _ = try Frontend.fromByte(message[0]);
+        _ = Frontend.fromByte(message[0]);
     }
 }
