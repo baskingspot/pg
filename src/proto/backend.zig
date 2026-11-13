@@ -48,46 +48,20 @@ pub const Message = union(messages.Backend) {
 
     /// Decode one body, given the tag byte from its frame.
     ///
+    /// Derived from the union: an arm's name is a field of
+    /// `messages.Backend`, so the mapping from tag to decoder is the union
+    /// itself and adding an arm adds its decoder.
+    ///
     /// A tag this library does not name is `error.UnknownTag` rather than a
     /// panic, so a caller can forward it or fail on its own terms.
     pub fn decode(tag: u8, body: []const u8) error{ UnexpectedEof, UnknownTag }!Message {
-        return switch (messages.Backend.fromByte(tag)) {
-            .authentication => .{ .authentication = try .decode(body) },
-            .backend_key_data => .{ .backend_key_data = try .decode(body) },
-            .bind_complete => .{ .bind_complete = try .decode(body) },
-            .close_complete => .{ .close_complete = try .decode(body) },
-            .command_complete => .{ .command_complete = try .decode(body) },
-            .copy_both_response => .{ .copy_both_response = try .decode(body) },
-            .copy_data => .{ .copy_data = try .decode(body) },
-            .copy_done => .{ .copy_done = try .decode(body) },
-            .copy_in_response => .{ .copy_in_response = try .decode(body) },
-            .copy_out_response => .{ .copy_out_response = try .decode(body) },
-            .data_row => .{ .data_row = try .decode(body) },
-            .empty_query_response => .{
-                .empty_query_response = try .decode(body),
-            },
-            .error_response => .{ .error_response = try ErrorResponse.decode(body) },
-            .function_call_response => .{
-                .function_call_response = try FunctionCallResponse.decode(body),
-            },
-            .negotiate_protocol_version => .{
-                .negotiate_protocol_version = try NegotiateProtocolVersion.decode(body),
-            },
-            .no_data => .{ .no_data = try NoData.decode(body) },
-            .notice_response => .{ .notice_response = try NoticeResponse.decode(body) },
-            .notification_response => .{
-                .notification_response = try NotificationResponse.decode(body),
-            },
-            .parameter_description => .{
-                .parameter_description = try ParameterDescription.decode(body),
-            },
-            .parameter_status => .{ .parameter_status = try ParameterStatus.decode(body) },
-            .parse_complete => .{ .parse_complete = try ParseComplete.decode(body) },
-            .portal_suspended => .{ .portal_suspended = try PortalSuspended.decode(body) },
-            .ready_for_query => .{ .ready_for_query = try ReadyForQuery.decode(body) },
-            .row_description => .{ .row_description = try RowDescription.decode(body) },
-            else => error.UnknownTag,
-        };
+        const info = @typeInfo(Message).@"union";
+        inline for (info.field_names, info.field_types) |name, Arm| {
+            if (@backingInt(@field(messages.Backend, name)) == tag) {
+                return @unionInit(Message, name, try Arm.decode(body));
+            }
+        }
+        return error.UnknownTag;
     }
 
     pub fn format(self: Message, writer: *Io.Writer) Io.Writer.Error!void {
