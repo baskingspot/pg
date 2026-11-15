@@ -17,59 +17,59 @@ const Io = std.Io;
 const readInt = @import("mem.zig").readInt;
 const writeInt = @import("mem.zig").writeInt;
 
-pub const Version = struct {
-    /// Big-endian, major then minor, exactly the four bytes on the wire.
-    wire: [4]u8,
+const Version = @This();
 
-    /// Protocol 3.0. What a client sends when it wants the 3.0 semantics,
-    /// including a four-byte `BackendKeyData` key.
-    pub const v3_0: Version = .init(3, 0);
+/// Big-endian, major then minor, exactly the four bytes on the wire.
+wire: [4]u8,
 
-    /// Protocol 3.2, which PostgreSQL 18 describes. `BackendKeyData` and
-    /// `CancelRequest` keys became 4 to 256 bytes here.
-    pub const v3_2: Version = .init(3, 2);
+/// Protocol 3.0. What a client sends when it wants the 3.0 semantics,
+/// including a four-byte `BackendKeyData` key.
+pub const v3_0: Version = .init(3, 0);
 
-    pub fn init(major_number: u16, minor_number: u16) Version {
-        var wire: [4]u8 = undefined;
-        writeInt(u16, wire[0..2], major_number);
-        writeInt(u16, wire[2..4], minor_number);
-        return .{ .wire = wire };
-    }
+/// Protocol 3.2, which PostgreSQL 18 describes. `BackendKeyData` and
+/// `CancelRequest` keys became 4 to 256 bytes here.
+pub const v3_2: Version = .init(3, 2);
 
-    /// The wire form, for a reader that already has four bytes in hand.
-    pub inline fn fromBytes(wire: [4]u8) Version {
-        return .{ .wire = wire };
-    }
+pub fn init(major_number: u16, minor_number: u16) Version {
+    var wire: [4]u8 = undefined;
+    writeInt(u16, wire[0..2], major_number);
+    writeInt(u16, wire[2..4], minor_number);
+    return .{ .wire = wire };
+}
 
-    pub inline fn fromU32(word: u32) Version {
-        var wire: [4]u8 = undefined;
-        writeInt(u32, &wire, word);
-        return .{ .wire = wire };
-    }
+/// The wire form, for a reader that already has four bytes in hand.
+pub inline fn fromBytes(wire: [4]u8) Version {
+    return .{ .wire = wire };
+}
 
-    pub inline fn toU32(self: Version) u32 {
-        return readInt(u32, &self.wire);
-    }
+pub inline fn fromU32(word: u32) Version {
+    var wire: [4]u8 = undefined;
+    writeInt(u32, &wire, word);
+    return .{ .wire = wire };
+}
 
-    pub inline fn major(self: Version) u16 {
-        return readInt(u16, self.wire[0..2]);
-    }
+pub inline fn toU32(self: Version) u32 {
+    return readInt(u32, &self.wire);
+}
 
-    pub inline fn minor(self: Version) u16 {
-        return readInt(u16, self.wire[2..4]);
-    }
+pub inline fn major(self: Version) u16 {
+    return readInt(u16, self.wire[0..2]);
+}
 
-    /// `3.0`, for a log line.
-    pub fn format(self: Version, writer: *Io.Writer) Io.Writer.Error!void {
-        try writer.print("{d}.{d}", .{ self.major(), self.minor() });
-    }
+pub inline fn minor(self: Version) u16 {
+    return readInt(u16, self.wire[2..4]);
+}
 
-    pub inline fn eql(a: Version, b: Version) bool {
-        const a_int: u32 = @bitCast(a.wire);
-        const b_int: u32 = @bitCast(b.wire);
-        return a_int == b_int;
-    }
-};
+/// `3.0`, for a log line.
+pub fn format(self: Version, writer: *Io.Writer) Io.Writer.Error!void {
+    try writer.print("{d}.{d}", .{ self.major(), self.minor() });
+}
+
+pub inline fn eql(a: Version, b: Version) bool {
+    const a_int: u32 = @bitCast(a.wire);
+    const b_int: u32 = @bitCast(b.wire);
+    return a_int == b_int;
+}
 
 test "the wire bytes are the version" {
     try testing.expectEqual([4]u8{ 0, 3, 0, 0 }, Version.v3_0.wire);
