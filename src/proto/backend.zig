@@ -5,9 +5,16 @@
 //! hands out an iterator, because a client cannot know how many columns fit a
 //! fixed buffer and this layer does not allocate.
 //!
-//! Encoding is not here yet. A proxy forwards the bytes it already has, and a
-//! server constructing one of these wants a shape made of slices rather than a
-//! borrowed body, so that is its own pass.
+//! Encoding reads the same union backwards. A message decoded here keeps the
+//! body it came from, so `write` re-emits it and a proxy can forward a message
+//! it never interpreted. The field-wise writers cover the messages whose shape
+//! is values rather than bytes: `CommandComplete`, `ParameterStatus`,
+//! `NotificationResponse`, `BackendKeyData`, `ReadyForQuery`,
+//! `FunctionCallResponse`, and `Authentication`.
+//!
+//! What is missing is constructing a backend message from values, which is a
+//! server's shape: a `DataRow` built from columns rather than re-emitted from a
+//! body. That arrives with a caller.
 
 const std = @import("std");
 const testing = std.testing;
