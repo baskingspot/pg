@@ -12,7 +12,7 @@ const testing = std.testing;
 const Io = std.Io;
 
 const print = @import("print.zig");
-const version = @import("version.zig");
+const Version = @import("Version.zig");
 const wire = @import("wire.zig");
 const write = @import("write.zig");
 
@@ -83,7 +83,7 @@ pub fn length(prefix: []const u8) DecodeError!u32 {
 /// cannot build the slice without allocating and the bytes are already the
 /// correct encoding.
 pub const Startup = struct {
-    version: version.Version = .v3_0,
+    version: Version = .v3_0,
     /// In any order. `user` is required by the server; everything else is a
     /// run-time parameter, and names starting with `_pq_.` are reserved for
     /// protocol extensions.
@@ -100,7 +100,7 @@ pub const Startup = struct {
         var reader: wire.Reader = .init(body);
         const code = try reader.read(u32);
         return .{
-            .version = version.Version.fromU32(code),
+            .version = Version.fromU32(code),
             .body = reader.remaining(),
         };
     }
@@ -293,7 +293,7 @@ test "a startup body decodes to its version" {
     const body = "\x00\x03\x00\x00" ++ "user\x00matt\x00" ++ "\x00";
     const message = try Message.decode(body);
 
-    try testing.expectEqual(version.Version.v3_0, message.startup.version);
+    try testing.expectEqual(Version.v3_0, message.startup.version);
 
     var sent = message.startup.sent();
     const user = (try sent.next()).?;

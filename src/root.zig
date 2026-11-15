@@ -37,7 +37,7 @@ pub const messages = @import("proto/messages.zig");
 pub const replication = @import("proto/replication.zig");
 pub const sqlstate = @import("proto/sqlstate.zig");
 pub const startup = @import("proto/startup.zig");
-pub const version = @import("proto/version.zig");
+pub const Version = @import("proto/Version.zig");
 pub const wire = @import("proto/wire.zig");
 pub const write = @import("proto/write.zig");
 
