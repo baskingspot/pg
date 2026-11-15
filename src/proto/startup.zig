@@ -14,11 +14,10 @@ const Io = std.Io;
 const print = @import("print.zig");
 const Version = @import("Version.zig");
 const wire = @import("wire.zig");
+const DecodeError = wire.Error;
 const write = @import("write.zig");
-
 const Encoder = write.Encoder;
 const Error = write.Error;
-const DecodeError = wire.Error;
 
 /// The version whose number doubles as the SSL request code: `1234` in the high
 /// 16 bits, `5679` in the low.
@@ -100,7 +99,7 @@ pub const Startup = struct {
         var reader: wire.Reader = .init(body);
         const code = try reader.read(u32);
         return .{
-            .version = Version.fromU32(code),
+            .version = .fromU32(code),
             .body = reader.remaining(),
         };
     }
@@ -194,8 +193,8 @@ pub const Message = union(enum) {
         return switch (code) {
             ssl_code => .ssl_request,
             gssenc_code => .gssenc_request,
-            cancel_code => .{ .cancel_request = try CancelRequest.decode(reader.remaining()) },
-            else => .{ .startup = try Startup.decode(body) },
+            cancel_code => .{ .cancel_request = try .decode(reader.remaining()) },
+            else => .{ .startup = try .decode(body) },
         };
     }
 
@@ -223,12 +222,12 @@ pub const Message = union(enum) {
     }
 
     pub fn format(self: *const Message, writer: *Io.Writer) Io.Writer.Error!void {
-        switch (self.*) {
-            .startup => |startup| try startup.format(writer),
-            .ssl_request => try writer.writeAll("SSLRequest"),
-            .gssenc_request => try writer.writeAll("GSSENCRequest"),
-            .cancel_request => |cancel| try cancel.format(writer),
-        }
+        try switch (self.*) {
+            .startup => |*startup| startup.format(writer),
+            .ssl_request => writer.writeAll("SSLRequest"),
+            .gssenc_request => writer.writeAll("GSSENCRequest"),
+            .cancel_request => |*cancel| cancel.format(writer),
+        };
     }
 };
 
