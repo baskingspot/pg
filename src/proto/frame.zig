@@ -9,7 +9,7 @@
 //! bytes in the runs the caller feeds it, so a `DataRow` larger than the read
 //! buffer costs nothing. A message with an empty body reports its header and
 //! then one `.body` with `complete`, which consumes nothing: drive the loop on
-//! `inMessage` as well as on unread bytes.
+//! `in_message` as well as on unread bytes.
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -83,9 +83,13 @@ pub const Decoder = struct {
         more,
     };
 
-    /// Drop a partial message. For a connection that is being torn down: an
-    /// error from `next` leaves the decoder positioned at the bad header, and
-    /// nothing useful can continue from there.
+    /// Drop a partial message, for a connection that is being torn down.
+    ///
+    /// An error from `next` means the bytes stopped lining up with a message
+    /// boundary. The decoder is left clean rather than stuck, so a caller that
+    /// ignored the error would read the middle of a message as a header and
+    /// get plausible nonsense back. Drop the connection instead of calling
+    /// this.
     pub fn reset(self: *Decoder) void {
         self.* = .init;
     }
@@ -228,6 +232,15 @@ test "one byte at a time" {
     // one byte long even when it arrives separately from the header.
     try testing.expectEqual(@as(u32, 1), slices[1].body);
     try testing.expectEqual(@as(u8, 'I'), bytes[bytes.len - 1]);
+}
+
+test "a bad length leaves no message open, and no answer" {
+    // The decoder looks usable after an error, which is why the caller has to
+    // treat one as fatal: the stream is somewhere in the middle of a message
+    // and the next five bytes will parse as a header if asked.
+    var decoder: Decoder = .init;
+    try testing.expectError(error.InvalidLength, decoder.next("Q\x00\x00\x00\x03"));
+    try testing.expect(decoder.in_message == false);
 }
 
 test "a length of three is rejected" {
