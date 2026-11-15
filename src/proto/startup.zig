@@ -30,6 +30,42 @@ pub const cancel_code: u32 = 80877102;
 /// `1234` and `5680`.
 pub const gssenc_code: u32 = 80877104;
 
+/// The longest startup packet PostgreSQL accepts. Its backend refuses one
+/// longer (`MAX_STARTUP_PACKET_LENGTH`), which is also what makes a peek at the
+/// first bytes possible: a tagged message's tag in that position reads as a
+/// length far past this.
+pub const max_len: u32 = 10000;
+
+/// What the first bytes of a connection say it is.
+///
+/// A client's first message has no tag: four bytes of length, then a version or
+/// a request code. A tagged message has its tag where the length would be, and
+/// those four bytes read as a length past `max_len`, so an unrecognized prefix
+/// is null rather than a guess.
+pub const Kind = enum {
+    startup,
+    ssl_request,
+    gssenc_request,
+    cancel_request,
+};
+
+/// The kind of message a connection is opening with, from at least eight bytes
+/// of it.
+pub fn peek(prefix: []const u8) ?Kind {
+    const length_field = length(prefix) catch return null;
+    if (prefix.len < 8) return null;
+    if (length_field < 8 or length_field > max_len) return null;
+
+    var reader: wire.Reader = .init(prefix[4..8]);
+    const code = reader.read(u32) catch return null;
+    return switch (code) {
+        ssl_code => .ssl_request,
+        gssenc_code => .gssenc_request,
+        cancel_code => .cancel_request,
+        else => .startup,
+    };
+}
+
 /// The length of a startup-phase message, from its first four bytes.
 ///
 /// The whole message on the wire is exactly this many bytes, from the length
@@ -195,6 +231,19 @@ pub const Message = union(enum) {
         }
     }
 };
+
+test "a peek says which message is opening the connection" {
+    try testing.expectEqual(Kind.ssl_request, peek("\x00\x00\x00\x08\x04\xd2\x16\x2f").?);
+    try testing.expectEqual(Kind.gssenc_request, peek("\x00\x00\x00\x08\x04\xd2\x16\x30").?);
+    try testing.expectEqual(Kind.cancel_request, peek("\x00\x00\x00\x10\x04\xd2\x16\x2e").?);
+    try testing.expectEqual(Kind.startup, peek("\x00\x00\x00\x08\x00\x03\x00\x00").?);
+
+    // A tagged message puts its tag where the length goes, and four bytes of
+    // 'Q' and zeroes read as a length far past what a startup packet may be.
+    try testing.expectEqual(@as(?Kind, null), peek("Q\x00\x00\x00\x0dselect 1\x00"));
+    try testing.expectEqual(@as(?Kind, null), peek("\x00\x00\x00\x04\x00\x00\x00\x00"));
+    try testing.expectEqual(@as(?Kind, null), peek("\x00\x00\x00\x08"));
+}
 
 test "a request is a length and a code, and nothing else" {
     var buffer: [32]u8 = undefined;
