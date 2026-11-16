@@ -30,7 +30,7 @@ pub const Quoted = struct {
 /// without punctuation.
 pub fn tagName(comptime E: type, value: E) ?[]const u8 {
     inline for (std.enums.values(E)) |declared| {
-        if (@backingInt(declared) == @backingInt(value)) return @tagName(declared);
+        if (declared == value) return @tagName(declared);
     }
     return null;
 }
