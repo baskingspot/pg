@@ -1,5 +1,5 @@
-//! PostgreSQL wire protocol in Zig: message framing, with no IO and no
-//! allocator.
+//! PostgreSQL wire protocol in Zig: frontend and backend message codecs, with no
+//! IO and no allocator.
 //!
 //! Callers provide every buffer. `frame.Decoder` finds message boundaries and
 //! hands out headers and body runs; the codecs that read a body into a message

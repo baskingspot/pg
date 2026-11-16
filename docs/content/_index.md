@@ -12,21 +12,50 @@ connection does next: a client, a server, or a proxy built on it owns the
 socket, the buffers, and the policy.
 
 - [Reading a stream](#reading-a-stream): `frame.Decoder` finds boundaries without holding a body, so a `DataRow` larger than the read buffer costs nothing.
-- [Decoding a message](#decoding-a-message): `backend.Message.decode` takes a tag and a body, and its borrowed slices point into that body.
-- [Writing a message](#writing-a-message): `frontend.Message.encode` writes the tag and the length; `write.Encoder` backfills a length that is only known after the body.
+- [Decoding a message](#decoding-a-message): `backend.Message.decode` takes a tag and a body, and every slice it returns points into that body.
+- [Writing a message](#writing-a-message): `frontend.Message.encode` writes the tag from the union arm and the length after the body.
 - [Opening a connection](#opening-a-connection): the four messages before the protocol has tags, and `startup.peek` for the first eight bytes.
-- [Error codes](#error-codes): `sqlstate.SqlState` is every SQLSTATE code, with the code as the enum tag.
-- [What is not here](#what-is-not-here): the connection, the algorithms, and the one builder that is missing.
+- [Error codes](#error-codes): `sqlstate.SqlState` holds every SQLSTATE code, and the code is the enum tag.
+- [Limits](#limits): no connection, no SCRAM, and one builder that is missing.
 
-## Reading a stream
+The [API reference](https://baskingspot.dev/pg/api/) documents every public
+symbol.
+
+# Getting started
+
+## Install
+
+```sh
+zig fetch --save https://baskingspot.dev/pg/v0.1.0.tar.gz
+```
+
+Add the module to your build:
+
+```zig
+const pg = b.dependency("pg", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("pg", pg.module("pg"));
+```
+
+## Import it
+
+```zig
+const pg = @import("pg");
+```
+
+The module name does not collide with anything in `std`.
+
+## Read the examples
+
+`pg` builds with Zig 0.17. `just ci` runs the tests, the lint, a benchmark smoke
+run, and this site's build, so a guide that stops compiling fails CI.
+
+# Reading a stream
 
 `frame.Decoder` hands back a header and then the body in whatever runs arrive.
 Nothing is copied, and no buffer has to be sized for the largest message a
 server might send.
 
 ```zig
-const pg = @import("pg");
-
 var decoder: pg.frame.Decoder = .init;
 var rest = bytes_from_the_socket;
 
@@ -59,14 +88,13 @@ A length below 4, or above 1 GiB, is `error.InvalidLength` or
 `error.MessageTooLong`. Either one means the bytes no longer line up with a
 message boundary: drop the connection rather than reading on.
 
-## Decoding a message
+# Decoding a message
 
 `backend.Message.decode` takes the tag byte from the header and the body as one
 slice. Every slice it returns points into that body, so the body has to outlive
 the message.
 
 ```zig
-const tag = pg.messages.Backend.fromByte(header.tag);
 const message = try pg.backend.Message.decode(header.tag, body);
 
 switch (message) {
@@ -93,7 +121,12 @@ Five messages carry a list whose size the wire decides: `DataRow`,
 copy responses. They keep the body and hand out an iterator, since this layer
 does not allocate.
 
-## Writing a message
+`Authentication` is a union over the twelve login codes, and the `p` tag is a
+union of its own: a password, a SASL initial response, a SASL response, and a GSS
+response share one byte, and only the authentication conversation knows which
+one arrived.
+
+# Writing a message
 
 ```zig
 var buffer: [512]u8 = undefined;
@@ -120,7 +153,11 @@ builders: `ErrorResponse` from a severity, a `SqlState`, and a message;
 `DataRow` from `[]const ?[]const u8`; `RowDescription` from the `Field` shape it
 decodes to.
 
-## Opening a connection
+`{f}` on a message gives the line a log wants. Strings are quoted and escaped,
+a password or a copy stream prints as a size, and `pg.print.tag` names a tag the
+library declares and prints the number otherwise, which `{t}` cannot do.
+
+# Opening a connection
 
 The first message on a connection has no tag: four bytes of length, then a
 version or a request code. `startup.peek` reads eight bytes and says which one
@@ -140,7 +177,7 @@ in front read far past the 10000-byte cap the server itself enforces on a
 startup packet, which is why an unrecognized prefix is null. `startup.length`
 gives the count of bytes to buffer, and `startup.Message.decode` the rest.
 
-## Error codes
+# Error codes
 
 `sqlstate.SqlState` is every SQLSTATE code as an enum whose tag is the code, so
 comparing, switching, and printing cost what an enum costs and there is no
@@ -161,8 +198,9 @@ An unknown code keeps its five bytes and compares equal to none of the named
 ones, since the registry is open and a client must carry a code it has not heard
 of.
 
-## What is not here
+# Limits
 
-- A connection. Startup, authentication, and the ready-for-query cycle are a state machine above this library.
-- SCRAM-SHA-256 and MD5. The messages they ride on are here, `Authentication` and `Password`, and the algorithms are not.
-- A builder for backend messages beyond the three named above. A server that needs others composes the bytes itself, or decodes one and rewrites it.
+- A connection: startup, authentication, and the ready-for-query cycle are a state machine above this library, and `pg` does not run one.
+- SCRAM-SHA-256 and MD5: the messages they ride on are here, `Authentication` and `Password`, and the algorithms are not. Nothing here can complete a login against PostgreSQL 10 or later on its own.
+- Backend builders beyond the three: a server that needs a `CommandComplete` or a `ParameterStatus` composed from values writes those bytes itself, or decodes one it received and rewrites it.
+- Replication bodies: `XLogData` carries the WAL stream, and the `pgoutput` format inside it is a decoder above this one.

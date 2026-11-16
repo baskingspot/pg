@@ -7,20 +7,22 @@
 
 PostgreSQL wire protocol in Zig: frontend and backend message codecs, with no IO and no allocator.
 
-Postgres defines 42 messages and four more that open a connection, and each one is a byte layout in the manual. This library is those layouts. It turns bytes into messages and messages into bytes, and it has no opinion about what a connection should do next. A client, a server, or a proxy built on it owns the socket, the buffers, and the policy; this owns the bytes.
-
-No allocator, no IO, and no `std.Io` in the wire path.
+Postgres defines 42 messages and four more that open a connection, and each one is a byte layout in the manual. This library is those layouts. It turns bytes into messages and messages into bytes, and it has no opinion about what a connection does next: a client, a server, or a proxy built on it owns the socket, the buffers, and the policy.
 
 ## What is in it
 
-- `pg.messages`: the tag byte of every message as an enum, and the SQLSTATE codes. `Backend.fromByte` is a cast, because a tag off the wire is a value the library has not necessarily named.
-- `pg.frame.Decoder`: finds message boundaries in a stream without holding a body, so a `DataRow` larger than the read buffer costs nothing. Reports a header, then the body in the runs the caller feeds it.
-- `pg.backend`: one arm per backend message, tagged by `messages.Backend`. Decodes borrow the body; `DataRow.values()`, `RowDescription.columns()`, and the copy responses hand out iterators. `write` re-emits what it decoded, and `ErrorResponse`, `DataRow`, and `RowDescription` also build from fields.
-- `pg.frontend`: one arm per frontend message, tagged by `messages.Frontend`, so an arm's name is its wire byte. `Message.encode` writes the tag and the length; `Decoded` reads the other direction, with views for the three messages whose lists have no fixed size.
-- `pg.startup`: `StartupMessage`, `SSLRequest`, `GSSENCRequest`, and `CancelRequest`, the phase that has no tag byte. `peek` reads eight bytes and says which one is opening the connection.
-- `pg.replication`: `XLogData`, the primary keepalive, the standby status update, and hot standby feedback, which ride inside `CopyData`.
-- `pg.write`: an `Encoder` over caller-owned bytes. `finish` backfills a length that is only known after the body was written.
-- `pg.print`: `{f}` on a message gives the one line a log wants. Strings are quoted and escaped, and a password or a copy stream prints as a size.
+- [Reading a stream](https://baskingspot.dev/pg/#reading-a-stream): `frame.Decoder` finds boundaries without holding a body, so a `DataRow` larger than the read buffer costs nothing.
+- [Decoding a message](https://baskingspot.dev/pg/#decoding-a-message): `backend.Message.decode` takes a tag and a body, and every slice it returns points into that body.
+- [Writing a message](https://baskingspot.dev/pg/#writing-a-message): `frontend.Message.encode` writes the tag from the union arm and the length after the body.
+- [Opening a connection](https://baskingspot.dev/pg/#opening-a-connection): the four messages before the protocol has tags, and `startup.peek` for the first eight bytes.
+- [Error codes](https://baskingspot.dev/pg/#error-codes): `sqlstate.SqlState` holds every SQLSTATE code, and the code is the enum tag.
+- [Limits](https://baskingspot.dev/pg/#limits): no connection, no SCRAM, and one builder that is missing.
+
+Not implemented:
+
+- A connection: the startup, authentication, and ready-for-query cycle is a state machine above this library.
+- SCRAM-SHA-256 and MD5: the messages they ride on are here, and the algorithms are not, so nothing here completes a login against PostgreSQL 10 or later on its own.
+- Backend builders beyond `ErrorResponse`, `DataRow`, and `RowDescription`: a server composing a `ParameterStatus` writes those bytes itself.
 
 ## Install
 
@@ -37,56 +39,19 @@ exe.root_module.addImport("pg", pg.module("pg"));
 
 `pg` builds with Zig 0.17.
 
-## Reading a stream
+## Documentation
 
-`frame.Decoder` hands back a header and then the body in whatever runs arrive, so nothing is copied and no buffer has to be sized for the largest message:
-
-```zig
-var decoder: pg.frame.Decoder = .init;
-var rest = bytes_from_the_socket;
-
-while (rest.len != 0 or decoder.in_message) {
-    const step = try decoder.next(rest);
-    rest = rest[step.consumed..];
-
-    switch (step.event) {
-        // `.more` is the only event that consumes nothing. A loop that does
-        // not stop here asks forever.
-        .more => break,
-        .header => |header| if (header.tag == 'D') {
-            // row in progress: accumulate the body runs if you need the bytes
-        },
-        .body => |complete| if (complete) {
-            // the message ended
-        },
-    }
-}
-```
-
-Decoding a body is `backend.Message.decode(tag, body)`, which needs the whole body in one slice.
-
-## Writing one
-
-```zig
-var buffer: [512]u8 = undefined;
-var encoder: pg.write.Encoder = .init;
-encoder.reset(&buffer);
-
-const message: pg.frontend.Message = .{ .query = .{ .sql = "select 1" } };
-const bytes = try message.encode(&encoder); // "Q\0\0\0\x0dselect 1\0"
-```
-
-A message whose bytes never vary is built at compile time from the same encoder, as in `pg.frontend.fixed.sync`.
-
-## What is not here
-
-- A connection. Startup, authentication, and the ready-for-query cycle are a state machine above this, and this library does not run one.
-- SCRAM-SHA-256 and MD5. The messages they ride on are here, `Authentication` and `Password`, and the algorithm is not.
-- Constructing a backend message from values beyond the three builders. A `DataRow` built from columns is there; a server that needs others writes them by hand.
+- The [guide](https://baskingspot.dev/pg/) covers reading a stream, decoding and writing messages, opening a connection, and the SQLSTATE vocabulary.
+- The [API reference](https://baskingspot.dev/pg/api/) documents every public symbol. Every declaration in `src/` carries the doc comment the API entry renders.
+- [`AGENTS.md`](AGENTS.md) has the working notes for the repository.
 
 ## Work on it
 
-`nix develop` provides the toolchain, and `just ci` runs what CI runs. `just bench` measures the decoders, and `just fuzz 10M` runs the fuzzer with an iteration budget.
+```sh
+just ci
+```
+
+`nix develop` provides the toolchain. `just` lists the recipes, and `just ci` runs the tests, the lint, a benchmark smoke run, and the site build. `just fuzz 10M` runs the fuzzer with an iteration budget, and `just bench` measures the decoders.
 
 ## License
 
