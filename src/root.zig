@@ -43,4 +43,5 @@ pub const write = @import("proto/write.zig");
 
 test {
     testing.refAllDecls(@This());
+    _ = @import("fuzz.zig");
 }

@@ -21,14 +21,13 @@ const testing = std.testing;
 const Io = std.Io;
 
 const error_response = @import("error_response.zig");
-const write = @import("write.zig");
-const Encoder = write.Encoder;
 const messages = @import("messages.zig");
-const sqlstate = @import("sqlstate.zig");
 const print = @import("print.zig");
+const sqlstate = @import("sqlstate.zig");
 const wire = @import("wire.zig");
 pub const Error = wire.Error;
-
+const write = @import("write.zig");
+const Encoder = write.Encoder;
 /// The encoder's error, which is the buffer running out.
 const WriteError = write.Error;
 
@@ -406,7 +405,7 @@ pub const ReadyForQuery = struct {
 
     pub fn decode(body: []const u8) Error!ReadyForQuery {
         var reader: wire.Reader = .init(body);
-        return .{ .status = messages.Transaction.fromByte(try reader.read(u8)) };
+        return .{ .status = .fromByte(try reader.read(u8)) };
     }
 
     pub fn write(self: *const ReadyForQuery, e: *Encoder) WriteError!void {
