@@ -413,7 +413,9 @@ pub const ReadyForQuery = struct {
     }
 
     pub fn format(self: ReadyForQuery, writer: *Io.Writer) Io.Writer.Error!void {
-        try writer.print("ReadyForQuery{{ .status = .{t} }}", .{self.status});
+        try writer.print("ReadyForQuery{{ .status = {f} }}", .{
+            print.tag(messages.Transaction, self.status),
+        });
     }
 };
 
@@ -983,6 +985,16 @@ test "an error prints its code and message" {
         "{f}",
         .{message},
     );
+}
+
+test "a message with a byte this library does not name still prints" {
+    // The fuzzer's first find: `{t}` panics on an unknown tag, and a decoder
+    // hands one over from any byte.
+    const unknown = try Message.decode('Z', "\x7a");
+    try testing.expectFmt("ReadyForQuery{ .status = 122 }", "{f}", .{unknown});
+
+    const known = try Message.decode('Z', "I");
+    try testing.expectFmt("ReadyForQuery{ .status = .idle }", "{f}", .{known});
 }
 
 test "the messages with no body print their names" {

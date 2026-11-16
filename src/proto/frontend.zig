@@ -28,9 +28,14 @@ pub const Format = enum(u16) {
 };
 
 /// Whether a name refers to a prepared statement or to a portal.
+///
+/// Non-exhaustive for the same reason the message tags are: the byte comes off
+/// the wire, and a decoder that panicked on a byte it did not expect would
+/// turn a bad client into a dead server.
 pub const Target = enum(u8) {
     statement = 'S',
     portal = 'P',
+    _,
 };
 
 /// A value, or a SQL NULL, which is a length of -1 and no bytes.
@@ -154,8 +159,8 @@ pub const Close = struct {
     }
 
     pub fn format(self: *const Close, writer: *Io.Writer) Io.Writer.Error!void {
-        try writer.print("Close{{ .target = .{t}, .name = {f} }}", .{
-            self.target,
+        try writer.print("Close{{ .target = {f}, .name = {f} }}", .{
+            print.tag(Target, self.target),
             print.quoted(self.name),
         });
     }
@@ -180,8 +185,8 @@ pub const Describe = struct {
     }
 
     pub fn format(self: *const Describe, writer: *Io.Writer) Io.Writer.Error!void {
-        try writer.print("Describe{{ .target = .{t}, .name = {f} }}", .{
-            self.target,
+        try writer.print("Describe{{ .target = {f}, .name = {f} }}", .{
+            print.tag(Target, self.target),
             print.quoted(self.name),
         });
     }
@@ -863,6 +868,13 @@ test "the fixed messages are what their encoders produce" {
     );
     try testing.expectEqualSlices(u8, &.{ 'D', 0, 0, 0, 6, 'P', 0 }, &fixed.describe_portal);
     try testing.expectEqualSlices(u8, &.{ 'E', 0, 0, 0, 9, 0, 0, 0, 0, 0 }, &fixed.execute_portal);
+}
+
+test "a target this library does not name is carried, not refused" {
+    // The byte comes off the wire, so a proxy sees whatever a client sent.
+    const close = try Close.decode("X" ++ "s\x00");
+    try testing.expectEqual(@as(u8, 'X'), @backingInt(close.target));
+    try testing.expectFmt("Close{ .target = 88, .name = \"s\" }", "{f}", .{close});
 }
 
 test "a query is a tag, a length, and the statement" {

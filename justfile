@@ -29,6 +29,11 @@ fmt:
     oxfmt README.md AGENTS.md .github
     just --fmt
 
+[doc("Run the fuzzer with an iteration budget, for example `just fuzz 50M`. Built-in test runner, ReleaseSafe for throughput")]
+[group("test")]
+fuzz LIMIT="10M":
+    zig build fuzz -Doptimize=ReleaseSafe --fuzz={{ LIMIT }}
+
 [doc("Run benchmarks (ReleaseFast by default); args pass to the binary: just bench -- --benchtime=250ms --filter=Frame")]
 [group("bench")]
 bench *ARGS:

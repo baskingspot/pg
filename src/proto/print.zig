@@ -24,6 +24,33 @@ pub const Quoted = struct {
     }
 };
 
+/// An enum from the wire: its tag name when this library declares that tag,
+/// and the number when it does not.
+///
+/// `{t}` on an unknown value of a non-exhaustive enum panics, and a decoder
+/// can produce one from any byte, so a log line cannot use it. This is the
+/// fuzzer's first find.
+pub fn tag(comptime E: type, value: E) Tag(E) {
+    return .{ .value = value };
+}
+
+pub fn Tag(comptime E: type) type {
+    return struct {
+        const Self = @This();
+
+        value: E,
+
+        pub fn format(self: Self, writer: *Io.Writer) Io.Writer.Error!void {
+            inline for (std.enums.values(E)) |declared| {
+                if (@backingInt(declared) == @backingInt(self.value)) {
+                    return writer.print(".{t}", .{declared});
+                }
+            }
+            try writer.print("{d}", .{@backingInt(self.value)});
+        }
+    };
+}
+
 /// A value whose contents stay out of the line: a password, or a copy stream.
 pub fn blob(bytes: []const u8) Blob {
     return .{ .len = bytes.len };

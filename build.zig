@@ -34,6 +34,14 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_mod_tests.step);
 
+    // Fuzzing needs the built-in runner and the LLVM backend: testingx refuses
+    // fuzz mode because the fuzzer speaks a private protocol, and the counters
+    // the fuzzer reads are only emitted by LLVM. `just fuzz` drives this.
+    const fuzz_tests = b.addTest(.{ .root_module = mod, .use_llvm = true });
+    const run_fuzz = b.addRunArtifact(fuzz_tests);
+    const fuzz_step = b.step("fuzz", "Fuzz the decoders (built-in test runner)");
+    fuzz_step.dependOn(&run_fuzz.step);
+
     // The benchmark suite. testingx's engine builds it ReleaseFast by default.
     if (b.lazyImport(@This(), "testingx")) |testingx| {
         const testingx_module = testingx_dep orelse unreachable;
