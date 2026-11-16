@@ -5,7 +5,7 @@
   </picture>
 </h1>
 
-PostgreSQL wire protocol in Zig: every message, both directions, no socket.
+PostgreSQL wire protocol in Zig: frontend and backend message codecs, with no IO and no allocator.
 
 Postgres defines 42 messages and four more that open a connection, and each one is a byte layout in the manual. This library is those layouts. It turns bytes into messages and messages into bytes, and it has no opinion about what a connection should do next. A client, a server, or a proxy built on it owns the socket, the buffers, and the policy; this owns the bytes.
 
