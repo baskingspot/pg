@@ -24,6 +24,7 @@ const error_response = @import("error_response.zig");
 const write = @import("write.zig");
 const Encoder = write.Encoder;
 const messages = @import("messages.zig");
+const sqlstate = @import("sqlstate.zig");
 const print = @import("print.zig");
 const wire = @import("wire.zig");
 pub const Error = wire.Error;
@@ -222,6 +223,25 @@ pub const SaslIterator = struct {
         return name;
     }
 };
+
+/// The `S` and `V` field values. The tag name is the text on the wire.
+pub const Severity = enum {
+    ERROR,
+    FATAL,
+    PANIC,
+    WARNING,
+    NOTICE,
+    DEBUG,
+    INFO,
+    LOG,
+};
+
+/// One field of an error or notice body: the code byte, the text, a zero.
+fn writeField(e: *Encoder, field: messages.ErrorField, value: []const u8) WriteError!void {
+    try e.int(u8, @backingInt(field));
+    try e.bytes(value);
+    try e.int(u8, 0);
+}
 
 /// `K`. The cancel key, to send in `CancelRequest` on another connection.
 pub const BackendKeyData = struct {
@@ -453,14 +473,26 @@ pub const NotificationResponse = struct {
     }
 };
 
-/// `D`. One row. The values are borrowed from the frame that carried them.
+/// `D`. One row.
+///
+/// Two sources, told apart by `body`: a row that arrived borrows the frame and
+/// its values come from `values`, and a row built by a server or a proxy
+/// writes `built`. `columns` is the count of a decoded row; a built one counts
+/// `built`.
 pub const DataRow = struct {
-    body: []const u8,
-    columns: u16,
+    body: []const u8 = "",
+    columns: u16 = 0,
+    /// The values to send, where a null is a SQL NULL.
+    built: []const ?[]const u8 = &.{},
 
     pub fn decode(body: []const u8) Error!DataRow {
         var reader: wire.Reader = .init(body);
         return .{ .body = body, .columns = try reader.read(u16) };
+    }
+
+    /// The number of columns, either way.
+    pub fn count(self: *const DataRow) u16 {
+        return if (self.body.len != 0) self.columns else @intCast(self.built.len);
     }
 
     /// The values, in column order. A null is a SQL NULL.
@@ -492,7 +524,20 @@ pub const DataRow = struct {
     };
 
     pub fn write(self: *const DataRow, e: *Encoder) WriteError!void {
-        try e.bytes(self.body);
+        if (self.body.len != 0) {
+            try e.bytes(self.body);
+            return;
+        }
+
+        try e.int(u16, @intCast(self.built.len));
+        for (self.built) |value| {
+            if (value) |bytes| {
+                try e.int(i32, @intCast(bytes.len));
+                try e.bytes(bytes);
+            } else {
+                try e.int(i32, -1);
+            }
+        }
     }
 
     pub fn format(self: *const DataRow, writer: *Io.Writer) Io.Writer.Error!void {
@@ -501,9 +546,15 @@ pub const DataRow = struct {
 };
 
 /// `T`. The columns a result will return, before the rows.
+///
+/// Two sources, told apart by `body`: a description that arrived borrows the
+/// frame and its columns come from `columns`, and one built by a server or a
+/// proxy writes `built`.
 pub const RowDescription = struct {
-    body: []const u8,
-    fields: u16,
+    body: []const u8 = "",
+    fields: u16 = 0,
+    /// The columns to send.
+    built: []const Field = &.{},
 
     pub fn decode(body: []const u8) Error!RowDescription {
         var reader: wire.Reader = .init(body);
@@ -548,7 +599,21 @@ pub const RowDescription = struct {
     };
 
     pub fn write(self: *const RowDescription, e: *Encoder) WriteError!void {
-        try e.bytes(self.body);
+        if (self.body.len != 0) {
+            try e.bytes(self.body);
+            return;
+        }
+
+        try e.int(u16, @intCast(self.built.len));
+        for (self.built) |column| {
+            try e.string(column.name);
+            try e.int(u32, column.table);
+            try e.int(i16, column.column);
+            try e.int(u32, column.type);
+            try e.int(i16, column.type_size);
+            try e.int(i32, column.type_modifier);
+            try e.int(u16, column.format);
+        }
     }
 
     pub fn format(self: *const RowDescription, writer: *Io.Writer) Io.Writer.Error!void {
@@ -697,8 +762,23 @@ pub const CopyBoth = CopyBody("CopyBoth");
 
 /// `E`. A failed statement. The connection stays up unless the severity says
 /// otherwise.
+///
+/// Two sources, told apart by `body`: a message that arrived keeps its bytes
+/// and re-emits them, and a message a server or a proxy makes up writes the
+/// fields below. `fields` iterates the wire form, so it is empty on a message
+/// that was built rather than read.
 pub const ErrorResponse = struct {
-    body: []const u8,
+    body: []const u8 = "",
+
+    /// `S`, the severity, localized by the server that sent it.
+    severity: ?Severity = null,
+    /// `V`, the same severity in English. PostgreSQL sends both; a message
+    /// built here sends whichever are set.
+    severity_unlocalized: ?Severity = null,
+    /// `C`.
+    code: ?sqlstate.SqlState = null,
+    /// `M`.
+    message: ?[]const u8 = null,
 
     pub fn decode(body: []const u8) Error!ErrorResponse {
         return .{ .body = body };
@@ -709,7 +789,27 @@ pub const ErrorResponse = struct {
     }
 
     pub fn write(self: *const ErrorResponse, e: *Encoder) WriteError!void {
-        try e.bytes(self.body);
+        if (self.body.len != 0) {
+            try e.bytes(self.body);
+            return;
+        }
+
+        if (self.severity) |severity| {
+            try writeField(e, .severity, @tagName(severity));
+        }
+        if (self.severity_unlocalized) |severity| {
+            try writeField(e, .severity_unlocalized, @tagName(severity));
+        }
+        if (self.code) |code| {
+            const bytes = code.code();
+            try writeField(e, .code, &bytes);
+        }
+        if (self.message) |message| {
+            try writeField(e, .message, message);
+        }
+
+        // A zero where a code would start is the end of the field list.
+        try e.int(u8, 0);
     }
 
     pub fn format(self: *const ErrorResponse, writer: *Io.Writer) Io.Writer.Error!void {
@@ -975,4 +1075,97 @@ test "every backend message encodes back to its bytes" {
         try testing.expectEqual(@as(u32, @intCast(bytes.len - 1)), try frame.read(u32));
         try testing.expectEqualSlices(u8, sample.body, bytes[5..]);
     }
+}
+
+test "an error built from fields encodes like one that arrived" {
+    var buffer: [128]u8 = undefined;
+    var e: Encoder = .init;
+    e.reset(&buffer);
+
+    const built: Message = .{
+        .error_response = .{
+            .severity = .ERROR,
+            .severity_unlocalized = .ERROR,
+            .code = .unique_violation,
+            .message = "duplicate key value",
+        },
+    };
+    const bytes = try built.encode(&e);
+
+    // S, V, C, M, then the terminator.
+    try testing.expectEqualSlices(
+        u8,
+        "E\x00\x00\x00\x2f" ++
+            "SERROR\x00" ++ "VERROR\x00" ++ "C23505\x00" ++ "Mduplicate key value\x00" ++
+            "\x00",
+        bytes,
+    );
+
+    // And it reads back as a field list, since the wire form is the only form.
+    const decoded = try Message.decode('E', bytes[5..]);
+    var fields = decoded.error_response.fields();
+    const first = (try fields.next()).?;
+    try testing.expectEqual(messages.ErrorField.severity, first.kind());
+    try testing.expectEqualStrings("ERROR", first.value);
+}
+
+test "a row built from values encodes like one that arrived" {
+    var buffer: [64]u8 = undefined;
+
+    const built: Message = .{
+        .data_row = .{ .built = &.{ "one", null } },
+    };
+    var e: Encoder = .init;
+    e.reset(&buffer);
+    const bytes = try built.encode(&e);
+
+    try testing.expectEqualSlices(
+        u8,
+        "D\x00\x00\x00\x11" ++ "\x00\x02" ++ "\x00\x00\x00\x03one" ++ "\xff\xff\xff\xff",
+        bytes,
+    );
+
+    const decoded = try Message.decode('D', bytes[5..]);
+    try testing.expectEqual(@as(u16, 2), decoded.data_row.count());
+    var values = decoded.data_row.values();
+    try testing.expectEqualStrings("one", (try values.next()).?.bytes.?);
+    try testing.expectEqual(@as(?[]const u8, null), (try values.next()).?.bytes);
+}
+
+test "a description built from fields encodes like one that arrived" {
+    var buffer: [128]u8 = undefined;
+
+    const built: Message = .{
+        .row_description = .{ .built = &.{.{
+            .name = "id",
+            .table = 0,
+            .column = 0,
+            .type = 23,
+            .type_size = 4,
+            .type_modifier = -1,
+            .format = 0,
+        }} },
+    };
+    var e: Encoder = .init;
+    e.reset(&buffer);
+    const bytes = try built.encode(&e);
+
+    try testing.expectEqualSlices(
+        u8,
+        "T\x00\x00\x00\x1b" ++
+            "\x00\x01" ++ "id\x00" ++
+            "\x00\x00\x00\x00" ++ // table
+            "\x00\x00" ++ // column
+            "\x00\x00\x00\x17" ++ // type
+            "\x00\x04" ++ // size
+            "\xff\xff\xff\xff" ++ // modifier
+            "\x00\x00", // format
+        bytes,
+    );
+
+    const decoded = try Message.decode('T', bytes[5..]);
+    var columns = decoded.row_description.columns();
+    const field = (try columns.next()).?;
+    try testing.expectEqualStrings("id", field.name);
+    try testing.expectEqual(@as(u32, 23), field.type);
 }
