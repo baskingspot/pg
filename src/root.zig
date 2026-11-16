@@ -34,6 +34,7 @@ pub const error_response = @import("proto/error_response.zig");
 pub const frame = @import("proto/frame.zig");
 pub const frontend = @import("proto/frontend.zig");
 pub const messages = @import("proto/messages.zig");
+pub const print = @import("proto/print.zig");
 pub const replication = @import("proto/replication.zig");
 pub const sqlstate = @import("proto/sqlstate.zig");
 pub const startup = @import("proto/startup.zig");

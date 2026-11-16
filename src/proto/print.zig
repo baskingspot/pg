@@ -24,6 +24,17 @@ pub const Quoted = struct {
     }
 };
 
+/// The name of a tag, or null when this library does not declare it.
+///
+/// For a caller that formats its own way, such as JSON, which wants the name
+/// without punctuation.
+pub fn tagName(comptime E: type, value: E) ?[]const u8 {
+    inline for (std.enums.values(E)) |declared| {
+        if (@backingInt(declared) == @backingInt(value)) return @tagName(declared);
+    }
+    return null;
+}
+
 /// An enum from the wire: its tag name when this library declares that tag,
 /// and the number when it does not.
 ///
@@ -41,10 +52,8 @@ pub fn Tag(comptime E: type) type {
         value: E,
 
         pub fn format(self: Self, writer: *Io.Writer) Io.Writer.Error!void {
-            inline for (std.enums.values(E)) |declared| {
-                if (@backingInt(declared) == @backingInt(self.value)) {
-                    return writer.print(".{t}", .{declared});
-                }
+            if (tagName(E, self.value)) |name| {
+                return writer.print(".{s}", .{name});
             }
             try writer.print("{d}", .{@backingInt(self.value)});
         }
@@ -68,6 +77,14 @@ test "quoted escapes what would break a line" {
     try testing.expectFmt("\"a\\nb\"", "{f}", .{quoted("a\nb")});
     try testing.expectFmt("\"\"", "{f}", .{quoted("")});
     try testing.expectFmt("\"it's\"", "{f}", .{quoted("it's")});
+}
+
+test "an undeclared tag has no name, but has a value" {
+    const E = enum(u8) { one = 1, _ };
+    try testing.expectEqualStrings("one", tagName(E, @fromBackingInt(1)).?);
+    try testing.expectEqual(@as(?[]const u8, null), tagName(E, @fromBackingInt(9)));
+    try testing.expectFmt(".one", "{f}", .{tag(E, @fromBackingInt(1))});
+    try testing.expectFmt("9", "{f}", .{tag(E, @fromBackingInt(9))});
 }
 
 test "blob prints a size" {
