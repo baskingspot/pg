@@ -1,0 +1,20 @@
+{
+  // Schema lives on unpkg because this repo has no node_modules.
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "baskingspot-dev-pg",
+  // Set to the date of the last deploy-relevant config change.
+  "compatibility_date": "2026-11-16",
+  // Pure static site: no worker script, so no `main` and no `binding`.
+  "assets": {
+    // The guide and the API reference under /pg/ (see justfile `doc`). The
+    // router forwards /pg/... without stripping the prefix.
+    "directory": "./zig-out/site",
+    "not_found_handling": "none",
+    "html_handling": "auto-trailing-slash",
+  },
+  // Deployed by CI after the Terraform in baskingspot/site creates this
+  // Worker and attaches baskingspot.dev/pg/ to it. No routes here: the router
+  // owns the domain, and the deploy token is scoped to this Worker only.
+  "workers_dev": false,
+  "preview_urls": false,
+}
