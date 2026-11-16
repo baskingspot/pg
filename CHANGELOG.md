@@ -5,6 +5,8 @@ All notable changes to pg are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-16
+
 ### Added
 
 - Every frontend and backend message in `pg.frontend` and `pg.backend`, tagged

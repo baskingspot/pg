@@ -25,7 +25,7 @@ No allocator, no IO, and no `std.Io` in the wire path.
 ## Install
 
 ```sh
-zig fetch --save git+https://github.com/baskingspot/pg
+zig fetch --save https://baskingspot.dev/pg/v0.1.0.tar.gz
 ```
 
 Add the module to your build:
