@@ -1,12 +1,12 @@
 //! Fuzz the decoders on the bodies a proxy forwards.
 //!
-//! `just test` replays every corpus entry through the runner, which is what
-//! runs in CI. Mutation needs Zig's own fuzzer, and on 0.17.1 neither entry
-//! point works from this tree: `zig build` with a fuzz module and `--fuzz`
-//! answers "no fuzz tests found", and `zig test -ffuzz` runs the binary
-//! without the `--cache-dir` its runner requires. A minimal package with one
-//! `testing.fuzz` test reproduces both, so it is the toolchain and not this
-//! wiring. Until that changes, the corpus is the check.
+//! `just test` replays every corpus entry through the runner, so the seeds
+//! reach CI on every run. `just fuzz` adds mutation, building the same module
+//! for Zig's own fuzzer, which needs two things the library build does not.
+//! The counters it reads are only emitted by LLVM, so this test compilation
+//! sets `use_llvm`. And testingx's runner refuses fuzz mode because the fuzzer
+//! speaks a private protocol, so this one uses the built-in runner and leaves
+//! `fuzz` off the module. The `fuzz` step in `build.zig` is that wiring.
 //!
 //! The property under test is the same in every one of them: whatever a
 //! decoder returns, every slice it hands back is inside the bytes it was
