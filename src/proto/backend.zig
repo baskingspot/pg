@@ -542,7 +542,7 @@ pub const DataRow = struct {
     }
 
     pub fn format(self: *const DataRow, writer: *Io.Writer) Io.Writer.Error!void {
-        try writer.print("DataRow{{ .columns = {d} }}", .{self.columns});
+        try writer.print("DataRow{{ .columns = {d} }}", .{self.count()});
     }
 };
 
@@ -618,7 +618,8 @@ pub const RowDescription = struct {
     }
 
     pub fn format(self: *const RowDescription, writer: *Io.Writer) Io.Writer.Error!void {
-        try writer.print("RowDescription{{ .fields = {d} }}", .{self.fields});
+        const count: u16 = if (self.body.len != 0) self.fields else @intCast(self.built.len);
+        try writer.print("RowDescription{{ .fields = {d} }}", .{count});
     }
 };
 
@@ -1002,6 +1003,57 @@ test "the messages with no body print their names" {
     try testing.expectFmt("NoData", "{f}", .{try Message.decode('n', "")});
     try testing.expectFmt("CopyDone", "{f}", .{try Message.decode('c', "")});
     try testing.expectError(error.UnexpectedEof, Message.decode('1', "\x00"));
+}
+
+test "a row built from values prints its count" {
+    // A built row keeps its count in `built`, not in `columns`, which stays
+    // zero. A null is still a column, so it is counted.
+    const built: Message = .{ .data_row = .{ .built = &.{ "one", null, "three" } } };
+    try testing.expectFmt("DataRow{ .columns = 3 }", "{f}", .{built});
+
+    // A row that arrived counts what its body says.
+    const body = "\x00\x03" ++
+        "\x00\x00\x00\x03" ++ "one" ++
+        "\xff\xff\xff\xff" ++
+        "\x00\x00\x00\x01" ++ "z";
+    const decoded: Message = try .decode('D', body);
+    try testing.expectFmt("DataRow{ .columns = 3 }", "{f}", .{decoded});
+}
+
+test "a description built from fields prints its count" {
+    const built: Message = .{ .row_description = .{ .built = &.{
+        .{
+            .name = "id",
+            .table = 0,
+            .column = 0,
+            .type = 23,
+            .type_size = 4,
+            .type_modifier = -1,
+            .format = 0,
+        },
+        .{
+            .name = "name",
+            .table = 0,
+            .column = 0,
+            .type = 25,
+            .type_size = -1,
+            .type_modifier = -1,
+            .format = 0,
+        },
+    } } };
+    try testing.expectFmt("RowDescription{ .fields = 2 }", "{f}", .{built});
+
+    // A description that arrived counts what its body says.
+    const body = "\x00\x01" ++
+        "id\x00" ++
+        "\x00\x00\x00\x00" ++ // table
+        "\x00\x00" ++ // column
+        "\x00\x00\x00\x17" ++ // type
+        "\x00\x04" ++ // size
+        "\xff\xff\xff\xff" ++ // modifier
+        "\x00\x00"; // format
+    const decoded: Message = try .decode('T', body);
+    try testing.expectFmt("RowDescription{ .fields = 1 }", "{f}", .{decoded});
 }
 
 test "copy responses carry the formats of their columns" {

@@ -5,6 +5,11 @@ All notable changes to pg are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `{f}` on a `DataRow` or `RowDescription` built from values printed a count of
+  zero. It prints the number of built values, and a null counts as a column.
+
 ## [0.1.0] - 2026-11-16
 
 ### Added
